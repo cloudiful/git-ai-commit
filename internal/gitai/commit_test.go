@@ -3,6 +3,7 @@ package gitai
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -120,6 +121,57 @@ func TestRunCommitUsesGeneratedMessageFile(t *testing.T) {
 	}
 	if gotArgs[len(gotArgs)-2] != "-s" || gotArgs[len(gotArgs)-1] != "--no-verify" {
 		t.Fatalf("expected original commit args to be preserved, got %v", gotArgs)
+	}
+}
+
+func TestRunCommitShowsGeneratingNoticeBeforeAIRequest(t *testing.T) {
+	restoreLoad := loadConfigFn
+	restoreCollect := collectRepoContextFn
+	restoreGenerate := generateMessageFn
+	restoreInteractive := runGitInteractiveFn
+	restoreStderr := os.Stderr
+	t.Cleanup(func() {
+		loadConfigFn = restoreLoad
+		collectRepoContextFn = restoreCollect
+		generateMessageFn = restoreGenerate
+		runGitInteractiveFn = restoreInteractive
+		os.Stderr = restoreStderr
+	})
+
+	loadConfigFn = func() (config, error) {
+		return config{timeout: time.Second, showTiming: false}, nil
+	}
+	collectRepoContextFn = func(_ context.Context, _ config) (repoContext, error) {
+		return repoContext{diffStat: " file.txt | 1 +", diffPatch: "diff --git a/file.txt b/file.txt", changedFileCount: 1, representedFileCount: 1}, nil
+	}
+	generateMessageFn = func(_ context.Context, _ config, _ repoContext) (string, generationMetrics, error) {
+		return "feat: add notice", generationMetrics{}, nil
+	}
+	runGitInteractiveFn = func(_ context.Context, _ string, args ...string) error {
+		return nil
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	os.Stderr = w
+
+	if err := runCommit(nil); err != nil {
+		t.Fatalf("runCommit returned error: %v", err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+
+	output, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stderr output: %v", err)
+	}
+
+	if !strings.Contains(string(output), "generating commit message from staged changes") {
+		t.Fatalf("expected generating notice in stderr, got %q", string(output))
 	}
 }
 

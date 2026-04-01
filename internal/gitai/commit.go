@@ -42,6 +42,7 @@ func runCommit(args []string) error {
 		return runPlainCommitWithNotice(args, errors.New("no staged changes available for AI prompt"))
 	}
 
+	fmt.Fprintln(os.Stderr, "git-ai-commit: generating commit message from staged changes...")
 	message, metrics, err := generateMessageFn(ctx, cfg, repoCtx)
 	if err != nil {
 		return runPlainCommitWithNotice(args, err)
