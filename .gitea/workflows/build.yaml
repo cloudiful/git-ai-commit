@@ -27,7 +27,7 @@ jobs:
           GOARCH: amd64
           CGO_ENABLED: 0
         run: |
-          go build -v -o ${{ github.event.repository.name }}-windows-amd64.exe
+          go build -v -o ${{ github.event.repository.name }}-windows-amd64.exe ./cmd/git-ai-commit
 
       - name: Build Linux
         env:
@@ -35,7 +35,7 @@ jobs:
           GOARCH: amd64
           CGO_ENABLED: 0
         run: |
-          go build -v -o ${{ github.event.repository.name }}-linux-amd64
+          go build -v -o ${{ github.event.repository.name }}-linux-amd64 ./cmd/git-ai-commit
 
       - name: Build macOS (Apple Silicon)
         env:
@@ -43,7 +43,7 @@ jobs:
           GOARCH: arm64
           CGO_ENABLED: 0
         run: |
-          go build -v -o ${{ github.event.repository.name }}-darwin-arm64
+          go build -v -o ${{ github.event.repository.name }}-darwin-arm64 ./cmd/git-ai-commit
 
       - name: Release
         uses: softprops/action-gh-release@v2
