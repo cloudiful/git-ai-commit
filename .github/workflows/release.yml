@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Prepare release artifacts
+        run: |
+          install -m 0755 target/release/git-ai-commit git-ai-commit-linux-amd64
+          sha256sum git-ai-commit-linux-amd64 > git-ai-commit-linux-amd64.sha256
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: git-ai-commit-release-${{ github.run_id }}
+          path: |
+            git-ai-commit-linux-amd64
+            git-ai-commit-linux-amd64.sha256
+          if-no-files-found: error
+
+  release-tag:
+    if: github.ref_type == 'tag'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: git-ai-commit-release-${{ github.run_id }}
+          path: dist
+
+      - name: Publish tagged release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/git-ai-commit-linux-amd64
+            dist/git-ai-commit-linux-amd64.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+
+  release-latest:
+    if: github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: git-ai-commit-release-${{ github.run_id }}
+          path: dist
+
+      - name: Publish latest prerelease
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: latest
+          name: Latest Build
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          files: |
+            dist/git-ai-commit-linux-amd64
+            dist/git-ai-commit-linux-amd64.sha256
+          fail_on_unmatched_files: true
