@@ -61,17 +61,21 @@ pub fn run_commit(args: &[String]) -> Result<(), String> {
     let mut message_file = write_commit_message_temp_file(&message)?;
     log_timing(&cfg, "commit", started, metrics);
 
-    if is_interactive_session()
-        && parsed_args.confirm_override.unwrap_or(cfg.confirm_commit)
-        && !prompt_for_commit_confirmation()?
-    {
-        eprintln!("git-ai-commit: commit canceled.");
-        return Ok(());
+    let mut open_editor = cfg.open_editor;
+    if is_interactive_session() && parsed_args.confirm_override.unwrap_or(cfg.confirm_commit) {
+        match prompt_for_commit_confirmation()? {
+            CommitConfirmation::Proceed => {}
+            CommitConfirmation::Edit => open_editor = true,
+            CommitConfirmation::Cancel => {
+                eprintln!("git-ai-commit: commit canceled.");
+                return Ok(());
+            }
+        }
     }
 
     let commit_args = build_ai_commit_args(
         message_file.path().to_string_lossy().into_owned(),
-        parsed_args.editor_override.unwrap_or(cfg.open_editor),
+        open_editor,
         &parsed_args.forward_args,
     );
     message_file
@@ -160,30 +164,26 @@ fn run_plain_commit_with_notice(args: &[String], reason: &str) -> Result<(), Str
 #[derive(Debug, PartialEq, Eq)]
 struct ParsedAiCommitArgs {
     forward_args: Vec<String>,
-    editor_override: Option<bool>,
     confirm_override: Option<bool>,
     show_redactions: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommitConfirmation {
+    Proceed,
+    Edit,
+    Cancel,
+}
+
 fn parse_ai_commit_args(args: &[String]) -> Result<ParsedAiCommitArgs, String> {
     let mut forward_args = Vec::with_capacity(args.len());
-    let mut editor_override = None;
     let mut confirm_override = None;
     let mut show_redactions = false;
 
     for arg in args {
         match arg.as_str() {
-            "--edit" => {
-                if editor_override == Some(false) {
-                    return Err("cannot use --edit and --no-edit together".to_string());
-                }
-                editor_override = Some(true);
-            }
-            "--no-edit" => {
-                if editor_override == Some(true) {
-                    return Err("cannot use --edit and --no-edit together".to_string());
-                }
-                editor_override = Some(false);
+            "--edit" | "--no-edit" => {
+                return Err(format!("unknown git-ai-commit flag: {arg}"));
             }
             "--no-confirm" => confirm_override = Some(false),
             "--show-redactions" => show_redactions = true,
@@ -193,7 +193,6 @@ fn parse_ai_commit_args(args: &[String]) -> Result<ParsedAiCommitArgs, String> {
 
     Ok(ParsedAiCommitArgs {
         forward_args,
-        editor_override,
         confirm_override,
         show_redactions,
     })
@@ -216,7 +215,7 @@ fn write_commit_message_temp_file(message: &str) -> Result<NamedTempFile, String
     Ok(file)
 }
 
-fn prompt_for_commit_confirmation() -> Result<bool, String> {
+fn prompt_for_commit_confirmation() -> Result<CommitConfirmation, String> {
     loop {
         eprint!("{}", commit_confirmation_prompt());
         io::stderr().flush().map_err(|err| err.to_string())?;
@@ -226,21 +225,31 @@ fn prompt_for_commit_confirmation() -> Result<bool, String> {
             .read_line(&mut line)
             .map_err(|err| err.to_string())?;
 
-        match line.trim().to_ascii_lowercase().as_str() {
-            "y" | "yes" => return Ok(true),
-            "" | "n" | "no" => return Ok(false),
-            _ => eprintln!("git-ai-commit: enter y or n."),
+        match parse_commit_confirmation(line.trim()) {
+            Some(result) => return Ok(result),
+            None => eprintln!(
+                "git-ai-commit: enter y to commit, e to edit before commit, or n to cancel."
+            ),
         }
+    }
+}
+
+fn parse_commit_confirmation(input: &str) -> Option<CommitConfirmation> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "y" | "yes" => Some(CommitConfirmation::Proceed),
+        "e" | "edit" => Some(CommitConfirmation::Edit),
+        "" | "n" | "no" => Some(CommitConfirmation::Cancel),
+        _ => None,
     }
 }
 
 fn commit_confirmation_prompt() -> String {
     if !commit_prompt_colors_enabled() {
-        return "git-ai-commit: proceed with commit? [y/N] ".to_string();
+        return "git-ai-commit: commit now, edit before commit, or cancel? [y=e commit/e=edit/N=cancel] ".to_string();
     }
 
     format!(
-        "git-ai-commit: {ANSI_PROMPT_LABEL}proceed with commit?{ANSI_RESET} [{ANSI_PROMPT_YES}y{ANSI_RESET}/{ANSI_PROMPT_NO}N{ANSI_RESET}] "
+        "git-ai-commit: {ANSI_PROMPT_LABEL}commit now, edit before commit, or cancel?{ANSI_RESET} [{ANSI_PROMPT_YES}y=commit{ANSI_RESET}/e=edit/{ANSI_PROMPT_NO}N=cancel{ANSI_RESET}] "
     )
 }
 
@@ -267,9 +276,9 @@ fn git_config_global_get(key: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ParsedAiCommitArgs, build_ai_commit_args, commit_confirmation_prompt,
-        parse_ai_commit_args, should_bypass_ai_commit, ANSI_PROMPT_LABEL, ANSI_PROMPT_NO,
-        ANSI_PROMPT_YES,
+        ANSI_PROMPT_LABEL, ANSI_PROMPT_NO, ANSI_PROMPT_YES, CommitConfirmation, ParsedAiCommitArgs,
+        build_ai_commit_args, commit_confirmation_prompt, parse_ai_commit_args,
+        parse_commit_confirmation, should_bypass_ai_commit,
     };
 
     #[test]
@@ -296,26 +305,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_edit_override_flags() {
-        let parsed = parse_ai_commit_args(&[
-            "--edit".to_string(),
-            "-s".to_string(),
-            "--no-verify".to_string(),
-        ])
-        .expect("expected parsed args");
-
-        assert_eq!(
-            parsed,
-            ParsedAiCommitArgs {
-                forward_args: vec!["-s".to_string(), "--no-verify".to_string()],
-                editor_override: Some(true),
-                confirm_override: None,
-                show_redactions: false,
-            }
-        );
-    }
-
-    #[test]
     fn parses_commit_control_flags_without_forwarding_them() {
         let parsed = parse_ai_commit_args(&[
             "--no-confirm".to_string(),
@@ -328,7 +317,6 @@ mod tests {
             parsed,
             ParsedAiCommitArgs {
                 forward_args: vec!["-s".to_string()],
-                editor_override: None,
                 confirm_override: Some(false),
                 show_redactions: true,
             }
@@ -336,11 +324,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_conflicting_edit_flags() {
-        let err = parse_ai_commit_args(&["--edit".to_string(), "--no-edit".to_string()])
-            .expect_err("expected conflict");
+    fn rejects_legacy_edit_flags() {
+        let err = parse_ai_commit_args(&["--edit".to_string()]).expect_err("expected error");
+        assert!(err.contains("unknown git-ai-commit flag"));
         assert!(err.contains("--edit"));
-        assert!(err.contains("--no-edit"));
     }
 
     #[test]
@@ -375,7 +362,7 @@ mod tests {
     #[test]
     fn plain_confirmation_prompt_still_contains_question() {
         let prompt = commit_confirmation_prompt();
-        assert!(prompt.contains("proceed with commit?"));
+        assert!(prompt.contains("edit before commit"));
         assert!(prompt.contains("["));
     }
 
@@ -389,5 +376,22 @@ mod tests {
         assert!(prompt.contains(ANSI_PROMPT_LABEL));
         assert!(prompt.contains(ANSI_PROMPT_YES));
         assert!(prompt.contains(ANSI_PROMPT_NO));
+    }
+
+    #[test]
+    fn parses_confirmation_answers() {
+        assert_eq!(
+            parse_commit_confirmation("y"),
+            Some(CommitConfirmation::Proceed)
+        );
+        assert_eq!(
+            parse_commit_confirmation("edit"),
+            Some(CommitConfirmation::Edit)
+        );
+        assert_eq!(
+            parse_commit_confirmation(""),
+            Some(CommitConfirmation::Cancel)
+        );
+        assert_eq!(parse_commit_confirmation("wat"), None);
     }
 }

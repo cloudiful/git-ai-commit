@@ -36,7 +36,7 @@ git ai-commit -s
 ## How It Works
 
 `git ai-commit` reads staged changes, asks configured model to draft commit
-message, asks for `y/N` confirmation in interactive use, then runs normal Git
+message, asks for `y/e/N` confirmation in interactive use, then runs normal Git
 commit flow with generated message.
 
 ## Common Options
@@ -44,14 +44,13 @@ commit flow with generated message.
 ```sh
 git ai-commit --no-confirm
 git ai-commit --show-redactions
-git ai-commit --edit
-git ai-commit --no-edit
 git-ai-commit generate
 git-ai-commit doctor
 ```
 
-- `--no-confirm`: skip the `y/N` confirmation prompt and commit immediately.
+- `--no-confirm`: skip the interactive `y/e/N` confirmation prompt and commit immediately.
 - `--show-redactions`: print detailed redaction entries; by default only the redaction summary count is shown.
+- Interactive confirm prompt: use `y` to commit now, `e` to open the generated message in your editor before committing, or `n`/Enter to cancel.
 
 ## Environment Overrides
 
