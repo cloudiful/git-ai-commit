@@ -1,3 +1,4 @@
+use crate::text_budget;
 use tiktoken_rs::{CoreBPE, o200k_base};
 
 #[derive(Clone)]
@@ -55,31 +56,13 @@ impl Tokenizer {
         max_tokens: usize,
         notice: &str,
     ) -> (String, bool) {
-        if max_tokens == 0 {
-            return (String::new(), !input.is_empty());
-        }
-        if self.count(input) <= max_tokens {
-            return (input.to_string(), false);
-        }
-
-        let notice_tokens = self.count(notice);
-        let available = max_tokens.saturating_sub(notice_tokens);
-        if available == 0 {
-            return (self.trim_to_budget(notice, max_tokens), true);
-        }
-
-        let mut trimmed = self.trim_to_budget(input, available);
-        if let Some(idx) = trimmed.rfind('\n').filter(|idx| *idx > 0) {
-            trimmed.truncate(idx + 1);
-        }
-        if trimmed.is_empty() {
-            trimmed = self.trim_to_budget(input, available);
-        }
-        if trimmed.is_empty() {
-            return (self.trim_to_budget(notice, max_tokens), true);
-        }
-
-        (format!("{trimmed}{notice}"), true)
+        text_budget::trim_with_notice_at_line_boundary(
+            input,
+            max_tokens,
+            notice,
+            |value| self.count(value),
+            |value, budget| self.trim_to_budget(value, budget),
+        )
     }
 }
 

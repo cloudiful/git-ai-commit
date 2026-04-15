@@ -123,6 +123,10 @@ pub(super) fn chat_completions_url(base: &str) -> String {
     api_endpoint_url(base, "chat/completions")
 }
 
+pub(crate) fn models_url(base: &str) -> String {
+    api_endpoint_url(base, "models")
+}
+
 fn api_endpoint_url(base: &str, endpoint: &str) -> String {
     let base = base.trim().trim_end_matches('/');
     for known_endpoint in ["/chat/completions", "/responses"] {
@@ -139,7 +143,7 @@ fn api_endpoint_url(base: &str, endpoint: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{api_endpoint_url, build_prompt, build_prompt_scaffold};
+    use super::{api_endpoint_url, build_prompt, build_prompt_scaffold, models_url};
     use crate::git::RepoContext;
 
     #[test]
@@ -151,6 +155,10 @@ mod tests {
         assert_eq!(
             api_endpoint_url("https://api.openai.com/v1/responses", "chat/completions"),
             "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            models_url("http://localhost:11434"),
+            "http://localhost:11434/v1/models"
         );
     }
 

@@ -5,6 +5,7 @@ mod stream;
 use crate::config::Config;
 use crate::message::validate_message;
 use reqwest::blocking::Client;
+use reqwest::blocking::RequestBuilder;
 use std::time::{Duration, Instant};
 
 use self::request::{
@@ -16,6 +17,7 @@ use self::response::{
 };
 use self::stream::StreamRenderer;
 
+pub(crate) use self::request::models_url;
 pub(crate) use self::request::{MAX_OUTPUT_TOKENS, SYSTEM_PROMPT, build_prompt_scaffold};
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -63,12 +65,20 @@ struct ApiAttemptError {
     should_fallback: bool,
 }
 
-fn new_http_client(cfg: &Config) -> Result<Client, String> {
+pub(crate) fn new_http_client(cfg: &Config) -> Result<Client, String> {
     let mut builder = Client::builder().timeout(cfg.timeout);
     if !cfg.use_env_proxy {
         builder = builder.no_proxy();
     }
     builder.build().map_err(|err| err.to_string())
+}
+
+pub(crate) fn apply_auth(builder: RequestBuilder, cfg: &Config) -> RequestBuilder {
+    if cfg.should_send_bearer_auth() {
+        builder.bearer_auth(&cfg.api_key)
+    } else {
+        builder
+    }
 }
 
 fn generate_message_via_responses(
@@ -89,9 +99,7 @@ fn generate_message_via_responses(
         stream: renderer.enabled(),
     };
 
-    let response = client
-        .post(responses_url(&cfg.api_base))
-        .bearer_auth(&cfg.api_key)
+    let response = apply_auth(client.post(responses_url(&cfg.api_base)), cfg)
         .json(&request)
         .send()
         .map_err(|err| ApiAttemptError {
@@ -139,9 +147,7 @@ fn generate_message_via_chat_completions(
         stream: renderer.enabled(),
     };
 
-    let response = client
-        .post(chat_completions_url(&cfg.api_base))
-        .bearer_auth(&cfg.api_key)
+    let response = apply_auth(client.post(chat_completions_url(&cfg.api_base)), cfg)
         .json(&request)
         .send()
         .map_err(|err| err.to_string())?;

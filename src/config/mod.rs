@@ -1,3 +1,4 @@
+mod provider;
 mod sources;
 
 #[cfg(test)]
@@ -6,6 +7,7 @@ mod tests;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+pub use self::provider::{DEFAULT_OLLAMA_API_BASE, Provider, is_loopback_url, is_ollama_cloud_url};
 use self::sources::{ConfigSnapshot, load_config_snapshot};
 
 pub const DEFAULT_TIMEOUT_SEC: u64 = 15;
@@ -25,6 +27,7 @@ pub enum DiffBudgetConfig {
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub provider: Provider,
     pub api_base: String,
     pub api_key: String,
     pub model: String,
@@ -41,6 +44,7 @@ pub struct Config {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(super) struct FileConfig {
+    pub(super) provider: Option<String>,
     pub(super) api_base: Option<String>,
     pub(super) api_key: Option<String>,
     pub(super) model: Option<String>,
@@ -57,6 +61,7 @@ pub(super) struct FileConfig {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct RawConfigValues {
+    pub(super) provider: Option<String>,
     pub(super) api_base: Option<String>,
     pub(super) api_key: Option<String>,
     pub(super) model: Option<String>,
@@ -75,21 +80,26 @@ pub fn load_config() -> Result<Config, String> {
     let cfg = load_partial_config()?;
     let missing = missing_required_config_keys(&cfg);
     if !missing.is_empty() {
-        return Err(
-            "missing GIT_AI_COMMIT_API_BASE, GIT_AI_COMMIT_API_KEY, or GIT_AI_COMMIT_MODEL"
-                .to_string(),
-        );
+        return Err(format!("missing {}", missing.join(", ")));
     }
     Ok(cfg)
 }
 
 pub fn load_partial_config() -> Result<Config, String> {
     let snapshot = load_config_snapshot()?;
+    let provider = snapshot.provider_value()?;
+    let api_base = snapshot.string_value(
+        |values| values.api_base.as_ref(),
+        |cfg| cfg.api_base.as_ref(),
+    );
+    let api_base = if provider == Provider::Ollama && api_base.is_empty() {
+        DEFAULT_OLLAMA_API_BASE.to_string()
+    } else {
+        api_base
+    };
     Ok(Config {
-        api_base: snapshot.string_value(
-            |values| values.api_base.as_ref(),
-            |cfg| cfg.api_base.as_ref(),
-        ),
+        provider,
+        api_base,
         api_key: snapshot
             .string_value(|values| values.api_key.as_ref(), |cfg| cfg.api_key.as_ref()),
         model: snapshot.string_value(|values| values.model.as_ref(), |cfg| cfg.model.as_ref()),
@@ -154,7 +164,7 @@ pub fn missing_required_config_keys(cfg: &Config) -> Vec<&'static str> {
     if cfg.api_base.trim().is_empty() {
         missing.push("ai.commit.apiBase");
     }
-    if cfg.api_key.trim().is_empty() {
+    if cfg.requires_api_key() && cfg.api_key.trim().is_empty() {
         missing.push("ai.commit.apiKey");
     }
     if cfg.model.trim().is_empty() {
@@ -164,6 +174,21 @@ pub fn missing_required_config_keys(cfg: &Config) -> Vec<&'static str> {
 }
 
 impl ConfigSnapshot {
+    pub(super) fn provider_value(&self) -> Result<Provider, String> {
+        let raw = self
+            .env
+            .provider
+            .as_ref()
+            .or(self.git.provider.as_ref())
+            .or_else(|| self.file.as_ref().and_then(|cfg| cfg.provider.as_ref()));
+
+        match raw {
+            Some(raw) => Provider::parse(raw)
+                .ok_or_else(|| format!("invalid ai.commit.provider value {:?}", raw)),
+            None => Ok(Provider::default()),
+        }
+    }
+
     pub(super) fn string_value(
         &self,
         raw_getter: impl Fn(&RawConfigValues) -> Option<&String>,
@@ -237,6 +262,49 @@ impl ConfigSnapshot {
 }
 
 impl Config {
+    pub fn requires_api_key(&self) -> bool {
+        match self.provider {
+            Provider::OpenAiCompatible => true,
+            Provider::Ollama => self.is_ollama_cloud(),
+        }
+    }
+
+    pub fn should_send_bearer_auth(&self) -> bool {
+        !self.api_key.trim().is_empty()
+    }
+
+    pub fn is_local_ollama(&self) -> bool {
+        self.provider == Provider::Ollama && is_loopback_url(&self.api_base)
+    }
+
+    pub fn is_ollama_cloud(&self) -> bool {
+        self.provider == Provider::Ollama && is_ollama_cloud_url(&self.api_base)
+    }
+
+    pub fn auth_mode_description(&self) -> String {
+        match self.provider {
+            Provider::OpenAiCompatible => {
+                if self.api_key.trim().is_empty() {
+                    "missing bearer token".to_string()
+                } else {
+                    "bearer token".to_string()
+                }
+            }
+            Provider::Ollama if self.is_local_ollama() => {
+                if self.api_key.trim().is_empty() {
+                    "none (local ollama)".to_string()
+                } else {
+                    "bearer token configured (optional for local ollama)".to_string()
+                }
+            }
+            Provider::Ollama if self.is_ollama_cloud() && self.api_key.trim().is_empty() => {
+                "missing bearer token (required for ollama cloud)".to_string()
+            }
+            Provider::Ollama if self.api_key.trim().is_empty() => "none".to_string(),
+            Provider::Ollama => "bearer token".to_string(),
+        }
+    }
+
     pub fn diff_budget(&self) -> DiffBudgetConfig {
         match self.max_diff_tokens {
             Some(max_tokens) => DiffBudgetConfig::Tokens {

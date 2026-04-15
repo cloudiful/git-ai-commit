@@ -1,3 +1,5 @@
+use crate::text_budget;
+
 pub const MAX_SUBJECT_CHARS: usize = 72;
 
 pub fn sanitize_message(message: &str) -> String {
@@ -53,30 +55,13 @@ pub fn trim_with_notice_at_line_boundary(
     max_bytes: usize,
     notice: &str,
 ) -> (String, bool) {
-    if max_bytes == 0 {
-        return (String::new(), !input.is_empty());
-    }
-    if input.len() <= max_bytes {
-        return (input.to_string(), false);
-    }
-
-    let available = max_bytes.saturating_sub(notice.len());
-    if available == 0 {
-        return (trim_to_utf8_bytes(notice, max_bytes), true);
-    }
-
-    let mut trimmed = trim_to_utf8_bytes(input, available);
-    if let Some(idx) = trimmed.rfind('\n').filter(|idx| *idx > 0) {
-        trimmed.truncate(idx + 1);
-    }
-    if trimmed.is_empty() {
-        trimmed = trim_to_utf8_bytes(input, available);
-    }
-    if trimmed.is_empty() {
-        return (trim_to_utf8_bytes(notice, max_bytes), true);
-    }
-
-    (format!("{trimmed}{notice}"), true)
+    text_budget::trim_with_notice_at_line_boundary(
+        input,
+        max_bytes,
+        notice,
+        |value| value.len(),
+        trim_to_utf8_bytes,
+    )
 }
 
 pub fn first_line(input: &str) -> &str {

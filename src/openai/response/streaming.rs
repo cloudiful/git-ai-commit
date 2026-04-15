@@ -3,6 +3,7 @@ use reqwest::blocking::Response;
 use std::io::{BufRead, BufReader};
 
 use super::models::{ChatCompletionChunk, ResponsesStreamEvent};
+use super::provider_status_error;
 use crate::openai::stream::{StreamRenderer, parse_sse_payloads};
 
 pub(super) fn parse_streaming_responses_api_response(
@@ -39,16 +40,13 @@ fn collect_streaming_responses_api_response<R: BufRead>(
         let event: ResponsesStreamEvent = serde_json::from_str(payload)
             .map_err(|err| format!("invalid responses stream event: {err}"))?;
 
-        if let Some(error) = event.error {
-            if !error.message.trim().is_empty() {
-                provider_error = error.message;
-            }
-        }
-        if let Some(message) = event.message {
-            if event.event_type == "error" && !message.trim().is_empty() {
-                provider_error = message;
-            }
-        }
+        update_provider_error(&mut provider_error, event.error.map(|error| error.message));
+        update_provider_error(
+            &mut provider_error,
+            event
+                .message
+                .filter(|message| event.event_type == "error" && !message.trim().is_empty()),
+        );
 
         match event.event_type.as_str() {
             "response.output_text.delta" => {
@@ -58,11 +56,9 @@ fn collect_streaming_responses_api_response<R: BufRead>(
                 }
             }
             "response.output_text.done" => {
-                if content.is_empty() {
-                    if let Some(text) = event.text {
-                        renderer.push(&text).map_err(|err| err.to_string())?;
-                        content.push_str(&text);
-                    }
+                if content.is_empty() && let Some(text) = event.text {
+                    renderer.push(&text).map_err(|err| err.to_string())?;
+                    content.push_str(&text);
                 }
             }
             _ => {}
@@ -72,11 +68,10 @@ fn collect_streaming_responses_api_response<R: BufRead>(
     })?;
 
     if status_code >= 400 {
-        if !provider_error.is_empty() {
-            return Err(provider_error);
-        }
-        return Err(format!(
-            "responses request failed with status {status_code}"
+        return Err(provider_status_error(
+            status_code,
+            non_empty_string(provider_error),
+            |status_code| format!("responses request failed with status {status_code}"),
         ));
     }
     if !saw_chunk {
@@ -103,11 +98,7 @@ pub(super) fn collect_streaming_chat_completion<R: BufRead>(
         saw_chunk = true;
         let chunk: ChatCompletionChunk = serde_json::from_str(payload)
             .map_err(|err| format!("invalid streaming chat completion chunk: {err}"))?;
-        if let Some(error) = chunk.error {
-            if !error.message.trim().is_empty() {
-                provider_error = error.message;
-            }
-        }
+        update_provider_error(&mut provider_error, chunk.error.map(|error| error.message));
         for choice in chunk.choices {
             let _ = choice.delta.role;
             if let Some(content_delta) = choice.delta.content {
@@ -122,14 +113,29 @@ pub(super) fn collect_streaming_chat_completion<R: BufRead>(
     })?;
 
     if status_code >= 400 {
-        if !provider_error.is_empty() {
-            return Err(provider_error);
-        }
-        return Err(format!("chat completion failed with status {status_code}"));
+        return Err(provider_status_error(
+            status_code,
+            non_empty_string(provider_error),
+            |status_code| format!("chat completion failed with status {status_code}"),
+        ));
     }
     if !saw_chunk {
         return Err("chat completion returned no stream chunks".to_string());
     }
 
     Ok(sanitize_message(&content))
+}
+
+fn update_provider_error(target: &mut String, candidate: Option<String>) {
+    if let Some(message) = candidate.filter(|message| !message.trim().is_empty()) {
+        *target = message;
+    }
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }

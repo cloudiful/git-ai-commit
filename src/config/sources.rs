@@ -21,6 +21,7 @@ pub(super) fn load_config_snapshot() -> Result<ConfigSnapshot, String> {
 
 fn load_env_values() -> RawConfigValues {
     RawConfigValues {
+        provider: env_value("GIT_AI_COMMIT_PROVIDER"),
         api_base: env_value("GIT_AI_COMMIT_API_BASE"),
         api_key: env_value("GIT_AI_COMMIT_API_KEY"),
         model: env_value("GIT_AI_COMMIT_MODEL"),
@@ -38,6 +39,7 @@ fn load_env_values() -> RawConfigValues {
 
 fn load_git_values() -> RawConfigValues {
     RawConfigValues {
+        provider: git_value("ai.commit.provider"),
         api_base: git_value("ai.commit.apiBase"),
         api_key: git_value("ai.commit.apiKey"),
         model: git_value("ai.commit.model"),
@@ -111,10 +113,10 @@ pub fn git_config_get(key: &str) -> Result<String, String> {
     let mut command = Command::new("git");
     command.args(["config", "--get", key]);
 
-    if let Ok(repo_root) = std::env::var("GIT_AI_COMMIT_REPO_ROOT") {
-        if !repo_root.trim().is_empty() {
-            command.current_dir(repo_root.trim());
-        }
+    if let Ok(repo_root) = std::env::var("GIT_AI_COMMIT_REPO_ROOT")
+        && !repo_root.trim().is_empty()
+    {
+        command.current_dir(repo_root.trim());
     }
 
     let output = command.output().map_err(|err| err.to_string())?;

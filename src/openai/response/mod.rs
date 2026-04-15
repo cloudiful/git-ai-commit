@@ -8,6 +8,7 @@ mod tests;
 use reqwest::blocking::Response;
 
 use super::stream::{StreamRenderer, is_event_stream};
+use self::models::ProviderError;
 
 pub(super) fn parse_responses_response(
     status_code: u16,
@@ -47,6 +48,20 @@ pub(super) fn parse_json_chat_completion(status_code: u16, body: &str) -> Result
 
 pub(super) fn should_fallback_from_responses(status_code: u16, error_message: &str) -> bool {
     json::should_fallback_from_responses(status_code, error_message)
+}
+
+fn provider_error_message(error: Option<ProviderError>) -> Option<String> {
+    error
+        .map(|error| error.message)
+        .filter(|message| !message.trim().is_empty())
+}
+
+fn provider_status_error(
+    status_code: u16,
+    provider_error: Option<String>,
+    default_message: impl FnOnce(u16) -> String,
+) -> String {
+    provider_error.unwrap_or_else(|| default_message(status_code))
 }
 
 #[cfg(test)]

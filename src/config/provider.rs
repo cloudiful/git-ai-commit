@@ -1,0 +1,52 @@
+use reqwest::Url;
+use std::net::IpAddr;
+
+pub const DEFAULT_OLLAMA_API_BASE: &str = "http://localhost:11434";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Provider {
+    #[default]
+    OpenAiCompatible,
+    Ollama,
+}
+
+impl Provider {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "openai" | "openai-compatible" => Some(Self::OpenAiCompatible),
+            "ollama" => Some(Self::Ollama),
+            _ => None,
+        }
+    }
+
+    pub fn as_config_value(self) -> &'static str {
+        match self {
+            Self::OpenAiCompatible => "openai-compatible",
+            Self::Ollama => "ollama",
+        }
+    }
+}
+
+pub fn is_loopback_url(base: &str) -> bool {
+    let Ok(url) = Url::parse(base.trim()) else {
+        return false;
+    };
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .map(|addr| addr.is_loopback())
+            .unwrap_or(false)
+}
+
+pub fn is_ollama_cloud_url(base: &str) -> bool {
+    let Ok(url) = Url::parse(base.trim()) else {
+        return false;
+    };
+
+    matches!(url.host_str(), Some(host) if host.eq_ignore_ascii_case("ollama.com"))
+}

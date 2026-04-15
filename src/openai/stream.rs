@@ -158,7 +158,7 @@ impl StreamRenderer {
             if !segment.is_empty() {
                 write!(writer, "{}{}", self.current_style(), segment)?;
             }
-            write!(writer, "{ANSI_RESET}\n")?;
+            writeln!(writer, "{ANSI_RESET}")?;
             self.in_subject_line = false;
             segment_start = idx + 1;
         }

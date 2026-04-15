@@ -9,6 +9,7 @@ mod message;
 mod openai;
 mod prompt;
 mod redaction;
+mod text_budget;
 mod tokenizer;
 
 pub use cli::run;

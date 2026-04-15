@@ -29,10 +29,10 @@ pub fn parse_diff_files(raw_diff: &str) -> Vec<DiffFile> {
     let mut in_hunk = false;
 
     let flush_hunk = |current: &mut Option<DiffFile>, current_hunk: &mut String| {
-        if let Some(file) = current.as_mut() {
-            if !current_hunk.is_empty() {
-                file.hunks.push(std::mem::take(current_hunk));
-            }
+        if let Some(file) = current.as_mut()
+            && !current_hunk.is_empty()
+        {
+            file.hunks.push(std::mem::take(current_hunk));
         }
     };
 
@@ -87,11 +87,9 @@ pub fn parse_diff_files(raw_diff: &str) -> Vec<DiffFile> {
     }
 
     flush_file(&mut files, &mut current, &mut current_hunk, &mut in_hunk);
-    if files.is_empty() {
-        if let Some(mut file) = current {
-            file.kind = classify_diff_file(&file);
-            files.push(file);
-        }
+    if files.is_empty() && let Some(mut file) = current {
+        file.kind = classify_diff_file(&file);
+        files.push(file);
     }
 
     files

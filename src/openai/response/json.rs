@@ -1,6 +1,7 @@
 use crate::message::sanitize_message;
 
 use super::models::{ChatCompletionResponse, ResponsesApiResponse};
+use super::{provider_error_message, provider_status_error};
 
 pub(super) fn parse_responses_api_response(status_code: u16, body: &str) -> Result<String, String> {
     let parsed: ResponsesApiResponse = match serde_json::from_str(body) {
@@ -12,13 +13,10 @@ pub(super) fn parse_responses_api_response(status_code: u16, body: &str) -> Resu
     };
 
     if status_code >= 400 {
-        if let Some(error) = parsed.error {
-            if !error.message.trim().is_empty() {
-                return Err(error.message);
-            }
-        }
-        return Err(format!(
-            "responses request failed with status {status_code}"
+        return Err(provider_status_error(
+            status_code,
+            provider_error_message(parsed.error),
+            |status_code| format!("responses request failed with status {status_code}"),
         ));
     }
 
@@ -56,12 +54,11 @@ pub(super) fn parse_json_chat_completion(status_code: u16, body: &str) -> Result
     };
 
     if status_code >= 400 {
-        if let Some(error) = parsed.error {
-            if !error.message.trim().is_empty() {
-                return Err(error.message);
-            }
-        }
-        return Err(format!("chat completion failed with status {status_code}"));
+        return Err(provider_status_error(
+            status_code,
+            provider_error_message(parsed.error),
+            |status_code| format!("chat completion failed with status {status_code}"),
+        ));
     }
 
     let choice = parsed

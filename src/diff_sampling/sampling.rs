@@ -44,7 +44,7 @@ pub fn prepare_diff_for_prompt(
 
     let normalized_patch = diff_patch.replace("\r\n", "\n");
     let (sampled_patch, represented_files, sampled) = sample_diff_patch(
-        &files,
+        files,
         &normalized_patch,
         patch_budget(
             budget,
