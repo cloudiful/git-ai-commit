@@ -34,26 +34,76 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target_name: linux-amd64
+            asset_name: git-ai-commit-linux-amd64
+            binary_path: target/release/git-ai-commit
+          - os: ubuntu-24.04-arm
+            target_name: linux-arm64
+            asset_name: git-ai-commit-linux-arm64
+            binary_path: target/release/git-ai-commit
+          - os: macos-26
+            target_name: macos-arm64
+            asset_name: git-ai-commit-macos-arm64
+            binary_path: target/release/git-ai-commit
+          - os: windows-latest
+            target_name: windows-amd64
+            asset_name: git-ai-commit-windows-amd64.exe
+            binary_path: target/release/git-ai-commit.exe
+          - os: windows-11-arm
+            target_name: windows-arm64
+            asset_name: git-ai-commit-windows-arm64.exe
+            binary_path: target/release/git-ai-commit.exe
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Build release binary
         run: cargo build --release --locked
 
-      - name: Prepare release artifacts
+      - name: Prepare Unix release artifacts
+        if: runner.os != 'Windows'
         run: |
-          install -m 0755 target/release/git-ai-commit git-ai-commit-linux-amd64
-          sha256sum git-ai-commit-linux-amd64 > git-ai-commit-linux-amd64.sha256
+          install -m 0755 "${{ matrix.binary_path }}" "${{ matrix.asset_name }}"
+          shasum -a 256 "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
+
+      - name: Prepare Windows release artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item "${{ matrix.binary_path }}" "${{ matrix.asset_name }}"
+          $hash = (Get-FileHash -Algorithm SHA256 "${{ matrix.asset_name }}").Hash.ToLowerInvariant()
+          "$hash  ${{ matrix.asset_name }}" | Out-File -FilePath "${{ matrix.asset_name }}.sha256" -Encoding ascii
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: git-ai-commit-release-${{ github.run_id }}
+          name: git-ai-commit-${{ matrix.target_name }}-${{ github.run_id }}
           path: |
-            git-ai-commit-linux-amd64
-            git-ai-commit-linux-amd64.sha256
+            ${{ matrix.asset_name }}
+            ${{ matrix.asset_name }}.sha256
           if-no-files-found: error
 
   release-tag:
     if: github.ref_type == 'tag'
-    needs: verify
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -61,21 +111,21 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
-          name: git-ai-commit-release-${{ github.run_id }}
+          pattern: git-ai-commit-*-${{ github.run_id }}
           path: dist
+          merge-multiple: true
 
       - name: Publish tagged release
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            dist/git-ai-commit-linux-amd64
-            dist/git-ai-commit-linux-amd64.sha256
+            dist/*
           fail_on_unmatched_files: true
           generate_release_notes: true
 
   release-latest:
     if: github.ref == 'refs/heads/main'
-    needs: verify
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -83,8 +133,9 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
-          name: git-ai-commit-release-${{ github.run_id }}
+          pattern: git-ai-commit-*-${{ github.run_id }}
           path: dist
+          merge-multiple: true
 
       - name: Publish latest prerelease
         uses: softprops/action-gh-release@v3
@@ -94,6 +145,5 @@ jobs:
           target_commitish: ${{ github.sha }}
           prerelease: true
           files: |
-            dist/git-ai-commit-linux-amd64
-            dist/git-ai-commit-linux-amd64.sha256
+            dist/*
           fail_on_unmatched_files: true
