@@ -90,14 +90,30 @@ commit flow with generated message.
 
 ```sh
 git ai-commit --no-confirm
+git ai-commit --debug-provider
 git ai-commit --show-redactions
 git-ai-commit generate
 git-ai-commit doctor
 ```
 
 - `--no-confirm`: skip the interactive `y/e/N` confirmation prompt and commit immediately.
+- `--debug-provider`: print provider endpoint, HTTP status, and response body summary to stderr when the upstream request fails.
 - `--show-redactions`: print detailed redaction entries; by default only the redaction summary count is shown.
 - Interactive confirm prompt: use `y` to commit now, `e` to open the generated message in your editor before committing, or `n`/Enter to cancel.
+
+## Model Context Tokens
+
+`ai.commit.modelContextTokens` lets diff sampling clamp itself against the model's total context window.
+
+```sh
+git config --global ai.commit.modelContextTokens 32768
+```
+
+When this value is unset and `ai.commit.apiBase` points to OpenRouter, `git-ai-commit` automatically looks up the configured model in OpenRouter's `/v1/models` catalog and uses the returned `top_provider.context_length` or `context_length`.
+
+- Explicit `ai.commit.modelContextTokens` always wins over auto-detection.
+- The lookup is done at runtime when generating the prompt, not while reading config.
+- Metadata is cached in memory for the current process only.
 
 ## Doctor
 
@@ -116,3 +132,4 @@ git-ai-commit doctor
 - `GIT_AI_COMMIT_API_BASE`
 - `GIT_AI_COMMIT_API_KEY`
 - `GIT_AI_COMMIT_MODEL`
+- `GIT_AI_COMMIT_DEBUG_PROVIDER`

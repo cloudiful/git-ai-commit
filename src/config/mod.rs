@@ -7,7 +7,9 @@ mod tests;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-pub use self::provider::{DEFAULT_OLLAMA_API_BASE, Provider, is_loopback_url, is_ollama_cloud_url};
+pub use self::provider::{
+    DEFAULT_OLLAMA_API_BASE, Provider, is_loopback_url, is_ollama_cloud_url, is_openrouter_url,
+};
 use self::sources::{ConfigSnapshot, load_config_snapshot};
 
 pub const DEFAULT_TIMEOUT_SEC: u64 = 15;
@@ -279,6 +281,12 @@ impl Config {
 
     pub fn is_ollama_cloud(&self) -> bool {
         self.provider == Provider::Ollama && is_ollama_cloud_url(&self.api_base)
+    }
+
+    pub fn should_auto_detect_model_context_tokens(&self) -> bool {
+        self.provider == Provider::OpenAiCompatible
+            && self.model_context_tokens.is_none()
+            && is_openrouter_url(&self.api_base)
     }
 
     pub fn auth_mode_description(&self) -> String {

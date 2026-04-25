@@ -87,7 +87,9 @@ pub fn parse_diff_files(raw_diff: &str) -> Vec<DiffFile> {
     }
 
     flush_file(&mut files, &mut current, &mut current_hunk, &mut in_hunk);
-    if files.is_empty() && let Some(mut file) = current {
+    if files.is_empty()
+        && let Some(mut file) = current
+    {
         file.kind = classify_diff_file(&file);
         files.push(file);
     }

@@ -22,7 +22,7 @@ pub(super) fn parse_streaming_chat_completion(
     collect_streaming_chat_completion(status_code, BufReader::new(response), renderer)
 }
 
-fn collect_streaming_responses_api_response<R: BufRead>(
+pub(super) fn collect_streaming_responses_api_response<R: BufRead>(
     status_code: u16,
     reader: R,
     renderer: &mut StreamRenderer,
@@ -55,10 +55,30 @@ fn collect_streaming_responses_api_response<R: BufRead>(
                     content.push_str(&delta);
                 }
             }
+            "response.content_part.delta" => {
+                if let Some(delta) = event.part.and_then(|part| part.text).or(event.delta) {
+                    renderer.push(&delta).map_err(|err| err.to_string())?;
+                    content.push_str(&delta);
+                }
+            }
             "response.output_text.done" => {
-                if content.is_empty() && let Some(text) = event.text {
+                if content.is_empty()
+                    && let Some(text) = event.text
+                {
                     renderer.push(&text).map_err(|err| err.to_string())?;
                     content.push_str(&text);
+                }
+            }
+            "response.output_item.done" => {
+                if content.is_empty()
+                    && let Some(item) = event.item
+                {
+                    for part in item.content {
+                        if let Some(text) = part.text {
+                            renderer.push(&text).map_err(|err| err.to_string())?;
+                            content.push_str(&text);
+                        }
+                    }
                 }
             }
             _ => {}

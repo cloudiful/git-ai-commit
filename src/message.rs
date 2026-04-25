@@ -9,7 +9,7 @@ pub fn sanitize_message(message: &str) -> String {
         .trim_start_matches("```")
         .trim_end_matches("```");
 
-    trimmed
+    let sanitized = trimmed
         .trim()
         .lines()
         .filter(|line| !line.trim_start().starts_with("```"))
@@ -17,7 +17,9 @@ pub fn sanitize_message(message: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
-        .to_string()
+        .to_string();
+
+    enforce_subject_limit(&sanitized)
 }
 
 pub fn validate_message(message: &str) -> Result<(), String> {
@@ -68,9 +70,50 @@ pub fn first_line(input: &str) -> &str {
     input.split('\n').next().unwrap_or(input)
 }
 
+fn enforce_subject_limit(message: &str) -> String {
+    if message.trim().is_empty() {
+        return String::new();
+    }
+
+    let mut lines = message.lines().map(str::to_string).collect::<Vec<_>>();
+    if let Some(subject) = lines.first_mut()
+        && subject.chars().count() > MAX_SUBJECT_CHARS
+    {
+        *subject = truncate_subject(subject);
+    }
+
+    lines.join("\n").trim().to_string()
+}
+
+fn truncate_subject(subject: &str) -> String {
+    if subject.chars().count() <= MAX_SUBJECT_CHARS {
+        return subject.to_string();
+    }
+
+    let mut cutoff = 0;
+    let mut last_space_cutoff = None;
+
+    for (idx, ch) in subject.char_indices() {
+        let next = idx + ch.len_utf8();
+        if subject[..next].chars().count() > MAX_SUBJECT_CHARS {
+            break;
+        }
+        cutoff = next;
+        if ch.is_whitespace() {
+            last_space_cutoff = Some(idx);
+        }
+    }
+
+    let preferred = last_space_cutoff.unwrap_or(cutoff);
+    subject[..preferred].trim_end().to_string()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_message, trim_to_utf8_bytes, trim_with_notice_at_line_boundary};
+    use super::{
+        MAX_SUBJECT_CHARS, sanitize_message, trim_to_utf8_bytes,
+        trim_with_notice_at_line_boundary,
+    };
 
     const DIFF_HUNK_TRUNCATED_NOTICE: &str = "[hunk truncated]\n";
 
@@ -108,5 +151,18 @@ mod tests {
         let sanitized = sanitize_message("```text\nfeat: add tests\n\nbody\n```");
         assert!(!sanitized.contains("```"));
         assert!(sanitized.contains("feat: add tests"));
+    }
+
+    #[test]
+    fn truncates_overlong_subject_at_word_boundary() {
+        let sanitized = sanitize_message(
+            "feat: add OpenRouter model context auto-detection and provider debug logging\n\n- body",
+        );
+        assert!(super::first_line(&sanitized).chars().count() <= MAX_SUBJECT_CHARS);
+        assert_eq!(
+            super::first_line(&sanitized),
+            "feat: add OpenRouter model context auto-detection and provider"
+        );
+        assert!(sanitized.contains("\n\n- body"));
     }
 }

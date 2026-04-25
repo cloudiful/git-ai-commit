@@ -51,6 +51,10 @@ pub(super) struct ResponsesStreamEvent {
     #[serde(default)]
     pub(super) text: Option<String>,
     #[serde(default)]
+    pub(super) item: Option<ResponseOutputItem>,
+    #[serde(default)]
+    pub(super) part: Option<ResponseContentPart>,
+    #[serde(default)]
     pub(super) error: Option<ProviderError>,
     #[serde(default)]
     pub(super) message: Option<String>,

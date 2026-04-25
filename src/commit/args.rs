@@ -3,6 +3,7 @@ pub(super) struct ParsedAiCommitArgs {
     pub(super) forward_args: Vec<String>,
     pub(super) confirm_override: Option<bool>,
     pub(super) show_redactions: bool,
+    pub(super) debug_provider: bool,
 }
 
 pub(super) fn should_bypass_ai_commit(args: &[String]) -> bool {
@@ -32,6 +33,7 @@ pub(super) fn parse_ai_commit_args(args: &[String]) -> Result<ParsedAiCommitArgs
     let mut forward_args = Vec::with_capacity(args.len());
     let mut confirm_override = None;
     let mut show_redactions = false;
+    let mut debug_provider = false;
 
     for arg in args {
         match arg.as_str() {
@@ -40,6 +42,7 @@ pub(super) fn parse_ai_commit_args(args: &[String]) -> Result<ParsedAiCommitArgs
             }
             "--no-confirm" => confirm_override = Some(false),
             "--show-redactions" => show_redactions = true,
+            "--debug-provider" => debug_provider = true,
             _ => forward_args.push(arg.clone()),
         }
     }
@@ -48,6 +51,7 @@ pub(super) fn parse_ai_commit_args(args: &[String]) -> Result<ParsedAiCommitArgs
         forward_args,
         confirm_override,
         show_redactions,
+        debug_provider,
     })
 }
 
@@ -110,6 +114,23 @@ mod tests {
                 forward_args: vec!["-s".to_string()],
                 confirm_override: Some(false),
                 show_redactions: true,
+                debug_provider: false,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_debug_provider_without_forwarding_it() {
+        let parsed = parse_ai_commit_args(&["--debug-provider".to_string(), "-s".to_string()])
+            .expect("expected parsed args");
+
+        assert_eq!(
+            parsed,
+            ParsedAiCommitArgs {
+                forward_args: vec!["-s".to_string()],
+                confirm_override: None,
+                show_redactions: false,
+                debug_provider: true,
             }
         );
     }
@@ -146,7 +167,8 @@ mod tests {
         ];
 
         for (open_editor, expected) in cases {
-            let args = build_ai_commit_args("message.txt".to_string(), open_editor, &["-s".to_string()]);
+            let args =
+                build_ai_commit_args("message.txt".to_string(), open_editor, &["-s".to_string()]);
             assert_eq!(args, expected);
         }
     }

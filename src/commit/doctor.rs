@@ -1,6 +1,6 @@
 use crate::config::{Config, Provider, load_partial_config, missing_required_config_keys};
 use crate::git::run_git;
-use crate::openai::{apply_auth, models_url, new_http_client};
+use crate::openai::{apply_auth, detect_model_context_tokens, models_url, new_http_client};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -37,7 +37,25 @@ pub(super) fn run_doctor(args: &[String]) -> Result<(), String> {
             println!("provider: {}", cfg.provider.as_config_value());
             println!("api base: {}", display_doctor_value(&cfg.api_base));
             println!("model: {}", display_doctor_value(&cfg.model));
+            println!(
+                "model context tokens: {}",
+                display_model_context_tokens(&cfg)
+            );
             println!("auth: {}", cfg.auth_mode_description());
+
+            if cfg.should_auto_detect_model_context_tokens() {
+                match detect_model_context_tokens(&cfg, false) {
+                    Ok(Some(value)) => {
+                        println!("model context tokens (auto): {value}");
+                    }
+                    Ok(None) => {
+                        println!("model context tokens (auto): unavailable");
+                    }
+                    Err(err) => {
+                        println!("model context tokens (auto): lookup failed ({err})");
+                    }
+                }
+            }
 
             if cfg.provider == Provider::Ollama {
                 for line in doctor_ollama_lines(&cfg) {
@@ -62,6 +80,12 @@ fn display_doctor_value(value: &str) -> &str {
     } else {
         value
     }
+}
+
+fn display_model_context_tokens(cfg: &Config) -> String {
+    cfg.model_context_tokens
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "(unset)".to_string())
 }
 
 fn doctor_ollama_lines(cfg: &Config) -> Vec<String> {

@@ -1,6 +1,6 @@
 use super::{
-    collect_streaming_chat_completion, parse_json_chat_completion, parse_responses_api_response,
-    should_fallback_from_responses,
+    collect_streaming_chat_completion, collect_streaming_responses_api_response,
+    parse_json_chat_completion, parse_responses_api_response, should_fallback_from_responses,
 };
 use crate::openai::StreamOutput;
 use crate::openai::stream::StreamRenderer;
@@ -39,6 +39,22 @@ fn streaming_chat_completion_handles_role_and_empty_delta_chunks() {
     let mut renderer = StreamRenderer::new(StreamOutput::None);
 
     let message = collect_streaming_chat_completion(200, Cursor::new(body), &mut renderer).unwrap();
+
+    assert_eq!(message, "feat: add parser");
+}
+
+#[test]
+fn streaming_responses_supports_openrouter_content_part_events() {
+    let body = concat!(
+        "data: {\"type\":\"response.content_part.delta\",\"part\":{\"text\":\"feat:\"}}\n\n",
+        "data: {\"type\":\"response.content_part.delta\",\"part\":{\"text\":\" add parser\"}}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"content\":[{\"text\":\"feat: add parser\"}]}}\n\n",
+        "data: [DONE]\n"
+    );
+    let mut renderer = StreamRenderer::new(StreamOutput::None);
+
+    let message =
+        collect_streaming_responses_api_response(200, Cursor::new(body), &mut renderer).unwrap();
 
     assert_eq!(message, "feat: add parser");
 }

@@ -50,3 +50,16 @@ pub fn is_ollama_cloud_url(base: &str) -> bool {
 
     matches!(url.host_str(), Some(host) if host.eq_ignore_ascii_case("ollama.com"))
 }
+
+pub fn is_openrouter_url(base: &str) -> bool {
+    let Ok(url) = Url::parse(base.trim()) else {
+        return false;
+    };
+
+    matches!(
+        url.host_str(),
+        Some(host)
+            if host.eq_ignore_ascii_case("openrouter.ai")
+                || host.eq_ignore_ascii_case("api.openrouter.ai")
+    )
+}

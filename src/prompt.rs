@@ -1,4 +1,7 @@
-use crate::config::{Config, DEFAULT_OLLAMA_API_BASE, Provider, is_ollama_cloud_url, load_config, load_partial_config};
+use crate::config::{
+    Config, DEFAULT_OLLAMA_API_BASE, Provider, is_ollama_cloud_url, load_config,
+    load_partial_config,
+};
 use std::io::{self, BufRead, IsTerminal, Write};
 
 pub fn load_config_for_interactive_use() -> Result<Config, String> {
@@ -246,8 +249,9 @@ where
         match default.filter(|value| !value.trim().is_empty()) {
             Some(default) => write!(self.output, "git-ai-commit: {label} [{default}]: ")
                 .map_err(|err| err.to_string())?,
-            None => write!(self.output, "git-ai-commit: {label}: ")
-                .map_err(|err| err.to_string())?,
+            None => {
+                write!(self.output, "git-ai-commit: {label}: ").map_err(|err| err.to_string())?
+            }
         }
         self.output.flush().map_err(|err| err.to_string())?;
 
@@ -256,7 +260,10 @@ where
             .read_line(&mut line)
             .map_err(|err| err.to_string())?;
         let trimmed = line.trim();
-        match (trimmed.is_empty(), default.filter(|value| !value.trim().is_empty())) {
+        match (
+            trimmed.is_empty(),
+            default.filter(|value| !value.trim().is_empty()),
+        ) {
             (true, Some(default)) => Ok(Some(default.trim().to_string())),
             (true, None) => Err("setup canceled".to_string()),
             (false, _) => Ok(Some(trimmed.to_string())),
@@ -304,7 +311,7 @@ pub fn git_config_global_set(key: &str, value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::prompt_for_missing_config_with;
-    use crate::config::{Config, Provider, DEFAULT_OLLAMA_API_BASE};
+    use crate::config::{Config, DEFAULT_OLLAMA_API_BASE, Provider};
     use std::io::Cursor;
     use std::time::Duration;
 
@@ -315,11 +322,12 @@ mod tests {
         let mut output = Vec::new();
         let mut writes = Vec::new();
 
-        let err = prompt_for_missing_config_with(&existing, &mut input, &mut output, |key, value| {
-            writes.push((key.to_string(), value.to_string()));
-            Ok(())
-        })
-        .expect_err("expected setup cancellation");
+        let err =
+            prompt_for_missing_config_with(&existing, &mut input, &mut output, |key, value| {
+                writes.push((key.to_string(), value.to_string()));
+                Ok(())
+            })
+            .expect_err("expected setup cancellation");
 
         assert_eq!(err, "setup canceled");
         assert!(writes.is_empty());
@@ -332,11 +340,12 @@ mod tests {
         let mut output = Vec::new();
         let mut writes = Vec::new();
 
-        let err = prompt_for_missing_config_with(&existing, &mut input, &mut output, |key, value| {
-            writes.push((key.to_string(), value.to_string()));
-            Ok(())
-        })
-        .expect_err("expected setup cancellation");
+        let err =
+            prompt_for_missing_config_with(&existing, &mut input, &mut output, |key, value| {
+                writes.push((key.to_string(), value.to_string()));
+                Ok(())
+            })
+            .expect_err("expected setup cancellation");
 
         assert_eq!(err, "setup canceled");
         assert!(writes.is_empty());

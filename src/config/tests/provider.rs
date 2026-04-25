@@ -86,3 +86,22 @@ fn rejects_invalid_provider_values() {
 
     assert!(err.contains("invalid ai.commit.provider value"));
 }
+
+#[test]
+fn auto_detects_context_only_for_openrouter_without_explicit_value() {
+    let mut env = TestConfigEnv::new();
+    env.set_env("GIT_AI_COMMIT_PROVIDER", Some("openai-compatible"));
+    env.set_env(
+        "GIT_AI_COMMIT_API_BASE",
+        Some("https://openrouter.ai/api/v1"),
+    );
+    env.set_env("GIT_AI_COMMIT_API_KEY", Some("token"));
+    env.set_env("GIT_AI_COMMIT_MODEL", Some("google/gemma-4-31b-it:free"));
+
+    let cfg = load_config().expect("expected config");
+    assert!(cfg.should_auto_detect_model_context_tokens());
+
+    env.set_env("GIT_AI_COMMIT_MODEL_CONTEXT_TOKENS", Some("32768"));
+    let cfg = load_config().expect("expected config with explicit context");
+    assert!(!cfg.should_auto_detect_model_context_tokens());
+}

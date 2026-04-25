@@ -5,7 +5,9 @@ mod doctor;
 
 use crate::generate::log_timing;
 use crate::git::{collect_repo_context, run_git_interactive};
-use crate::openai::{StreamOutput, generate_message_with_stream_output};
+use crate::openai::{
+    StreamOutput, generate_message_with_stream_output, resolve_model_context_config,
+};
 use crate::prompt::{is_interactive_session, load_config_for_interactive_use};
 use std::io::Write;
 use std::path::Path;
@@ -21,12 +23,13 @@ pub fn run_commit(args: &[String]) -> Result<(), String> {
     }
 
     let parsed_args = parse_ai_commit_args(args)?;
-
     let started = Instant::now();
     let cfg = match load_config_for_interactive_use() {
         Ok(cfg) => cfg,
         Err(err) => return run_plain_commit_with_notice(&parsed_args.forward_args, &err),
     };
+
+    let cfg = resolve_model_context_config(&cfg, parsed_args.debug_provider);
 
     let repo_ctx = match collect_repo_context(&cfg) {
         Ok(ctx) => ctx,
@@ -51,11 +54,15 @@ pub fn run_commit(args: &[String]) -> Result<(), String> {
     } else {
         StreamOutput::None
     };
-    let (message, metrics) =
-        match generate_message_with_stream_output(&cfg, &repo_ctx, stream_output) {
-            Ok(value) => value,
-            Err(err) => return run_plain_commit_with_notice(&parsed_args.forward_args, &err),
-        };
+    let (message, metrics) = match generate_message_with_stream_output(
+        &cfg,
+        &repo_ctx,
+        stream_output,
+        parsed_args.debug_provider,
+    ) {
+        Ok(value) => value,
+        Err(err) => return run_plain_commit_with_notice(&parsed_args.forward_args, &err),
+    };
 
     let mut message_file = write_commit_message_temp_file(&message)?;
     log_timing(&cfg, "commit", started, metrics);
