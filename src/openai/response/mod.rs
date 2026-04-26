@@ -56,6 +56,13 @@ pub(super) fn parse_json_chat_completion(status_code: u16, body: &str) -> Result
     json::parse_json_chat_completion(status_code, body)
 }
 
+pub(super) fn parse_json_chat_completion_content(
+    status_code: u16,
+    body: &str,
+) -> Result<String, String> {
+    json::parse_json_chat_completion_content(status_code, body)
+}
+
 pub(super) fn should_fallback_from_responses(status_code: u16, error_message: &str) -> bool {
     json::should_fallback_from_responses(status_code, error_message)
 }

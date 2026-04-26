@@ -3,20 +3,22 @@ mod response;
 mod stream;
 
 use crate::config::{Config, DEFAULT_MAX_DIFF_TOKENS, MAX_AUTO_DIFF_TOKENS};
-use crate::message::validate_message;
+use crate::message::{format_commit_message, validate_message};
 use reqwest::blocking::Client;
 use reqwest::blocking::RequestBuilder;
 use serde::Deserialize;
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use self::request::{
-    ChatCompletionRequest, ChatMessage, ResponseInputMessage, ResponsesRequest, build_prompt,
-    chat_completions_url, responses_url,
+    ChatCompletionRequest, ChatMessage, ChatResponseFormat, ChatResponseFormatJsonSchema,
+    ResponseInputMessage, ResponsesRequest, build_prompt, chat_completions_url, responses_url,
 };
 use self::response::{
-    parse_chat_completion_response, parse_responses_response, should_fallback_from_responses,
+    parse_chat_completion_response, parse_json_chat_completion_content, parse_responses_response,
+    should_fallback_from_responses,
 };
 use self::stream::StreamRenderer;
 
@@ -54,6 +56,13 @@ struct ModelCatalogEntry {
 struct ModelTopProvider {
     #[serde(default)]
     context_length: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct StructuredCommitMessage {
+    subject: String,
+    #[serde(default)]
+    body: Vec<String>,
 }
 
 fn env_debug_provider_enabled() -> bool {
@@ -360,6 +369,17 @@ pub fn generate_message_with_stream_output(
     let prompt = build_prompt(repo_ctx);
     let started = Instant::now();
     let mut renderer = StreamRenderer::new(stream_output);
+    if let Ok(message) =
+        generate_structured_message_via_chat_completions(cfg, &client, &prompt, debug_provider)
+    {
+        renderer.push(&message).map_err(|err| err.to_string())?;
+        renderer.finish().map_err(|err| err.to_string())?;
+        let metrics = GenerationMetrics {
+            api_duration: started.elapsed(),
+        };
+        validate_message(&message)?;
+        return Ok((message, metrics));
+    }
     let message = match generate_message_via_responses(
         cfg,
         &client,
@@ -497,6 +517,7 @@ fn generate_message_via_chat_completions(
         temperature: 0.2,
         max_tokens: MAX_OUTPUT_TOKENS as u32,
         stream: renderer.enabled(),
+        response_format: None,
     };
 
     if debug_enabled {
@@ -528,4 +549,69 @@ fn generate_message_via_chat_completions(
         renderer,
         debug_enabled,
     )
+}
+
+fn generate_structured_message_via_chat_completions(
+    cfg: &Config,
+    client: &Client,
+    prompt: &str,
+    debug_provider: bool,
+) -> Result<String, String> {
+    let debug_enabled = debug_provider || env_debug_provider_enabled();
+    let request = ChatCompletionRequest {
+        model: cfg.model.clone(),
+        messages: vec![
+            ChatMessage {
+                role: "system",
+                content: SYSTEM_PROMPT.to_string(),
+            },
+            ChatMessage {
+                role: "user",
+                content: prompt.to_string(),
+            },
+        ],
+        temperature: 0.1,
+        max_tokens: MAX_OUTPUT_TOKENS as u32,
+        stream: false,
+        response_format: Some(ChatResponseFormat {
+            format_type: "json_schema",
+            json_schema: ChatResponseFormatJsonSchema {
+                name: "git_commit_message",
+                strict: true,
+                schema: json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "subject": { "type": "string" },
+                        "body": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        }
+                    },
+                    "required": ["subject", "body"]
+                }),
+            },
+        }),
+    };
+
+    if debug_enabled {
+        eprintln!(
+            "git-ai-commit: provider debug: POST {} model={} stream=false response_format=json_schema",
+            chat_completions_url(&cfg.api_base),
+            cfg.model
+        );
+    }
+
+    let response = apply_auth(client.post(chat_completions_url(&cfg.api_base)), cfg)
+        .json(&request)
+        .send()
+        .map_err(|err| err.to_string())?;
+
+    let status_code = response.status().as_u16();
+    let body = response.text().map_err(|err| err.to_string())?;
+
+    let content = parse_json_chat_completion_content(status_code, &body)?;
+    let structured: StructuredCommitMessage = serde_json::from_str(&content)
+        .map_err(|err| format!("invalid structured commit message payload: {err}"))?;
+    format_commit_message(&structured.subject, &structured.body)
 }

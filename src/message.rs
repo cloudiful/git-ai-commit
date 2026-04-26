@@ -19,7 +19,8 @@ pub fn sanitize_message(message: &str) -> String {
         .trim()
         .to_string();
 
-    enforce_subject_limit(&sanitized)
+    let extracted = extract_commit_message(&sanitized);
+    enforce_subject_limit(&extracted)
 }
 
 pub fn validate_message(message: &str) -> Result<(), String> {
@@ -35,6 +36,27 @@ pub fn validate_message(message: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+pub fn format_commit_message(subject: &str, body: &[String]) -> Result<String, String> {
+    let subject = sanitize_message(subject);
+    if subject.trim().is_empty() {
+        return Err("structured commit message subject is empty".to_string());
+    }
+
+    let body_lines = body
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
+    let mut message = subject;
+    if !body_lines.is_empty() {
+        message.push_str("\n\n");
+        message.push_str(&body_lines.join("\n"));
+    }
+    Ok(message)
 }
 
 pub fn trim_to_utf8_bytes(input: &str, max_bytes: usize) -> String {
@@ -68,6 +90,88 @@ pub fn trim_with_notice_at_line_boundary(
 
 pub fn first_line(input: &str) -> &str {
     input.split('\n').next().unwrap_or(input)
+}
+
+fn extract_commit_message(message: &str) -> String {
+    if message.trim().is_empty() {
+        return String::new();
+    }
+
+    if conventional_commit_subject(first_line(message)).is_some() {
+        return message.trim().to_string();
+    }
+
+    for line in message.lines() {
+        if let Some(subject) = conventional_commit_subject(line) {
+            return subject.to_string();
+        }
+        if let Some(subject) = conventional_commit_subject_in_text(line) {
+            return subject;
+        }
+    }
+
+    message.trim().to_string()
+}
+
+fn conventional_commit_subject_in_text(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    for delimiter in ['`', '"', '\''] {
+        let mut parts = trimmed.split(delimiter);
+        let _ = parts.next();
+        for part in parts {
+            if let Some(subject) = conventional_commit_subject(part) {
+                return Some(subject.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn conventional_commit_subject(input: &str) -> Option<&str> {
+    let trimmed = input.trim();
+    let colon = trimmed.find(':')?;
+    let prefix = trimmed[..colon].trim_end();
+    let rest = trimmed[colon + 1..].trim_start();
+
+    if rest.is_empty() || !valid_conventional_prefix(prefix) {
+        return None;
+    }
+
+    Some(trimmed)
+}
+
+fn valid_conventional_prefix(prefix: &str) -> bool {
+    let Some(base) = prefix.strip_suffix('!').unwrap_or(prefix).split('(').next() else {
+        return false;
+    };
+    let valid_type = matches!(
+        base,
+        "feat"
+            | "fix"
+            | "docs"
+            | "style"
+            | "refactor"
+            | "perf"
+            | "test"
+            | "build"
+            | "ci"
+            | "chore"
+            | "revert"
+    );
+    if !valid_type {
+        return false;
+    }
+
+    if prefix.find('(').is_some() {
+        return prefix.ends_with(')') || prefix.ends_with(")!");
+    }
+
+    true
 }
 
 fn enforce_subject_limit(message: &str) -> String {
@@ -111,7 +215,8 @@ fn truncate_subject(subject: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_SUBJECT_CHARS, sanitize_message, trim_to_utf8_bytes, trim_with_notice_at_line_boundary,
+        MAX_SUBJECT_CHARS, sanitize_message, trim_to_utf8_bytes,
+        trim_with_notice_at_line_boundary,
     };
 
     const DIFF_HUNK_TRUNCATED_NOTICE: &str = "[hunk truncated]\n";
@@ -160,8 +265,19 @@ mod tests {
         assert!(super::first_line(&sanitized).chars().count() <= MAX_SUBJECT_CHARS);
         assert_eq!(
             super::first_line(&sanitized),
-            "feat: add OpenRouter model context auto-detection and provider"
+            "feat: add OpenRouter model context auto-detection and provider debug"
         );
         assert!(sanitized.contains("\n\n- body"));
+    }
+
+    #[test]
+    fn extracts_conventional_subject_from_verbose_output() {
+        let sanitized = sanitize_message(
+            "We need to generate a commit message from the given staged diff.\n\nPossible subject: `feat: auto-scale max_diff_tokens when model context is known`\n\nBody: explain details.",
+        );
+        assert_eq!(
+            sanitized,
+            "feat: auto-scale max_diff_tokens when model context is known"
+        );
     }
 }

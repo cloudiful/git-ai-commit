@@ -1,5 +1,6 @@
 use crate::git::RepoContext;
 use serde::Serialize;
+use serde_json::Value;
 
 pub(crate) const SYSTEM_PROMPT: &str = "You are an expert at writing Git commit messages. Your job is to write a short, clear commit message that summarizes the staged changes.\n\nUse English Conventional Commit style for the subject line.\n\nIf you can accurately express the change in just the subject line, do not include a message body. Only use the body when it provides useful information. Do not repeat information from the subject line in the body.\n\nReturn only the final commit message. Do not explain your reasoning. Do not describe the task. Do not preface the answer. Do not include code fences. Do not include the raw diff in the commit message.\n\nFollow good Git style:\n- Separate the subject from the body with a blank line\n- Keep the subject line within 72 characters\n- Use the imperative mood in the subject line\n- Keep the body short and concise\n- Do not invent behavior not present in the diff";
 pub(crate) const MAX_OUTPUT_TOKENS: usize = 220;
@@ -27,12 +28,28 @@ pub(super) struct ChatCompletionRequest {
     pub(super) temperature: f64,
     pub(super) max_tokens: u32,
     pub(super) stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) response_format: Option<ChatResponseFormat>,
 }
 
 #[derive(Serialize)]
 pub(super) struct ChatMessage {
     pub(super) role: &'static str,
     pub(super) content: String,
+}
+
+#[derive(Serialize)]
+pub(super) struct ChatResponseFormat {
+    #[serde(rename = "type")]
+    pub(super) format_type: &'static str,
+    pub(super) json_schema: ChatResponseFormatJsonSchema,
+}
+
+#[derive(Serialize)]
+pub(super) struct ChatResponseFormatJsonSchema {
+    pub(super) name: &'static str,
+    pub(super) strict: bool,
+    pub(super) schema: Value,
 }
 
 pub(super) fn build_prompt(repo_ctx: &RepoContext) -> String {
