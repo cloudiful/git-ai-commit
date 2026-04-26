@@ -9,6 +9,8 @@ mod git;
 mod message;
 mod openai;
 mod prompt;
+mod provider_common;
+mod provider_transport;
 mod redaction;
 mod text_budget;
 mod tokenizer;

@@ -52,7 +52,7 @@ where
     }
 }
 
-pub(super) struct StreamRenderer {
+pub(crate) struct StreamRenderer {
     output: StreamOutput,
     started: bool,
     colors_enabled: bool,
@@ -60,7 +60,7 @@ pub(super) struct StreamRenderer {
 }
 
 impl StreamRenderer {
-    pub(super) fn new(output: StreamOutput) -> Self {
+    pub(crate) fn new(output: StreamOutput) -> Self {
         Self {
             output,
             started: false,
@@ -69,11 +69,11 @@ impl StreamRenderer {
         }
     }
 
-    pub(super) fn enabled(&self) -> bool {
+    pub(crate) fn enabled(&self) -> bool {
         !matches!(self.output, StreamOutput::None)
     }
 
-    pub(super) fn push(&mut self, text: &str) -> std::io::Result<()> {
+    pub(crate) fn push(&mut self, text: &str) -> std::io::Result<()> {
         if text.is_empty() || !self.enabled() {
             return Ok(());
         }
@@ -109,7 +109,7 @@ impl StreamRenderer {
         }
     }
 
-    pub(super) fn finish(&mut self) -> std::io::Result<()> {
+    pub(crate) fn finish(&mut self) -> std::io::Result<()> {
         if !self.started || !self.enabled() {
             return Ok(());
         }
@@ -138,7 +138,7 @@ impl StreamRenderer {
         Ok(())
     }
 
-    pub(super) fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.started = false;
         self.in_subject_line = true;
     }

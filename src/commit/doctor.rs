@@ -1,6 +1,7 @@
 use crate::config::{Config, Provider, load_partial_config, missing_required_config_keys};
 use crate::git::run_git;
-use crate::openai::{apply_auth, detect_model_context_tokens, models_url, new_http_client};
+use crate::openai::{apply_auth, detect_model_context_tokens, models_url};
+use crate::provider_common::new_http_client;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -172,7 +173,8 @@ fn probe_ollama_endpoint(cfg: &Config) -> Result<OllamaProbe, String> {
 mod tests {
     use super::doctor_ollama_lines;
     use crate::config::{Config, Provider};
-    use crate::openai::{apply_auth, models_url, new_http_client};
+    use crate::openai::{apply_auth, models_url};
+    use crate::provider_common::new_http_client;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;

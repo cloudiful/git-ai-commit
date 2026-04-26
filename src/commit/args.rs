@@ -30,19 +30,29 @@ pub(super) fn should_bypass_ai_commit(args: &[String]) -> bool {
 }
 
 pub(super) fn parse_ai_commit_args(args: &[String]) -> Result<ParsedAiCommitArgs, String> {
-    let mut forward_args = Vec::with_capacity(args.len());
+    let mut forward_args = Vec::new();
     let mut confirm_override = None;
     let mut show_redactions = false;
     let mut debug_provider = false;
+    let mut passthrough_only = false;
 
     for arg in args {
+        if passthrough_only {
+            forward_args.push(arg.clone());
+            continue;
+        }
+
         match arg.as_str() {
-            "--edit" | "--no-edit" => {
-                return Err(format!("unknown git-ai-commit flag: {arg}"));
+            "--" => {
+                passthrough_only = true;
+                forward_args.push(arg.clone());
             }
             "--no-confirm" => confirm_override = Some(false),
             "--show-redactions" => show_redactions = true,
             "--debug-provider" => debug_provider = true,
+            "--edit" | "--no-edit" => {
+                return Err(format!("unknown git-ai-commit flag: {arg}"));
+            }
             _ => forward_args.push(arg.clone()),
         }
     }
@@ -120,6 +130,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_commit_control_flags_after_forwarded_git_flags() {
+        let parsed = parse_ai_commit_args(&[
+            "-s".to_string(),
+            "--show-redactions".to_string(),
+            "--no-confirm".to_string(),
+            "--debug-provider".to_string(),
+        ])
+        .expect("expected parsed args");
+
+        assert_eq!(
+            parsed,
+            ParsedAiCommitArgs {
+                forward_args: vec!["-s".to_string()],
+                confirm_override: Some(false),
+                show_redactions: true,
+                debug_provider: true,
+            }
+        );
+    }
+
+    #[test]
     fn parses_debug_provider_without_forwarding_it() {
         let parsed = parse_ai_commit_args(&["--debug-provider".to_string(), "-s".to_string()])
             .expect("expected parsed args");
@@ -140,6 +171,30 @@ mod tests {
         let err = parse_ai_commit_args(&["--edit".to_string()]).expect_err("expected error");
         assert!(err.contains("unknown git-ai-commit flag"));
         assert!(err.contains("--edit"));
+    }
+
+    #[test]
+    fn stops_parsing_control_flags_after_double_dash() {
+        let parsed = parse_ai_commit_args(&[
+            "-s".to_string(),
+            "--".to_string(),
+            "--no-confirm".to_string(),
+        ])
+        .expect("expected parsed args");
+
+        assert_eq!(
+            parsed,
+            ParsedAiCommitArgs {
+                forward_args: vec![
+                    "-s".to_string(),
+                    "--".to_string(),
+                    "--no-confirm".to_string()
+                ],
+                confirm_override: None,
+                show_redactions: false,
+                debug_provider: false,
+            }
+        );
     }
 
     #[test]
