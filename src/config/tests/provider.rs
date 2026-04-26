@@ -105,3 +105,20 @@ fn auto_detects_context_only_for_openrouter_without_explicit_value() {
     let cfg = load_config().expect("expected config with explicit context");
     assert!(!cfg.should_auto_detect_model_context_tokens());
 }
+
+#[test]
+fn auto_detects_anthropic_transport_from_api_base() {
+    let mut env = TestConfigEnv::new();
+    env.set_env("GIT_AI_COMMIT_PROVIDER", Some("openai-compatible"));
+    env.set_env(
+        "GIT_AI_COMMIT_API_BASE",
+        Some("https://api.deepseek.com/anthropic"),
+    );
+    env.set_env("GIT_AI_COMMIT_API_KEY", Some("token"));
+    env.set_env("GIT_AI_COMMIT_MODEL", Some("deepseek-chat"));
+
+    let cfg = load_config().expect("expected config");
+
+    assert!(cfg.should_use_anthropic_transport());
+    assert_eq!(cfg.auth_mode_description(), "x-api-key");
+}

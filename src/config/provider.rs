@@ -8,6 +8,7 @@ pub enum Provider {
     #[default]
     OpenAiCompatible,
     Ollama,
+    AnthropicCompatible,
 }
 
 impl Provider {
@@ -15,6 +16,7 @@ impl Provider {
         match raw.trim().to_ascii_lowercase().as_str() {
             "openai" | "openai-compatible" => Some(Self::OpenAiCompatible),
             "ollama" => Some(Self::Ollama),
+            "anthropic" | "anthropic-compatible" => Some(Self::AnthropicCompatible),
             _ => None,
         }
     }
@@ -23,6 +25,7 @@ impl Provider {
         match self {
             Self::OpenAiCompatible => "openai-compatible",
             Self::Ollama => "ollama",
+            Self::AnthropicCompatible => "anthropic-compatible",
         }
     }
 }
@@ -62,4 +65,13 @@ pub fn is_openrouter_url(base: &str) -> bool {
             if host.eq_ignore_ascii_case("openrouter.ai")
                 || host.eq_ignore_ascii_case("api.openrouter.ai")
     )
+}
+
+pub fn is_anthropic_compatible_url(base: &str) -> bool {
+    let Ok(url) = Url::parse(base.trim()) else {
+        return false;
+    };
+
+    let path = url.path().trim_end_matches('/').to_ascii_lowercase();
+    path == "/anthropic" || path.ends_with("/anthropic")
 }

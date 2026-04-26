@@ -35,6 +35,7 @@ pub(super) fn run_doctor(args: &[String]) -> Result<(), String> {
                 println!("config: not ready (missing {})", missing.join(", "));
             }
             println!("provider: {}", cfg.provider.as_config_value());
+            println!("transport: {}", transport_label(&cfg));
             println!("api base: {}", display_doctor_value(&cfg.api_base));
             println!("model: {}", display_doctor_value(&cfg.model));
             println!(
@@ -86,6 +87,18 @@ fn display_model_context_tokens(cfg: &Config) -> String {
     cfg.model_context_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "(unset)".to_string())
+}
+
+fn transport_label(cfg: &Config) -> &'static str {
+    if cfg.should_use_anthropic_transport() {
+        if cfg.provider == Provider::AnthropicCompatible {
+            "anthropic-compatible"
+        } else {
+            "anthropic-compatible (auto)"
+        }
+    } else {
+        "openai-compatible"
+    }
 }
 
 fn doctor_ollama_lines(cfg: &Config) -> Vec<String> {

@@ -53,7 +53,7 @@ pub(super) struct ChatResponseFormatJsonSchema {
     pub(super) schema: Value,
 }
 
-pub(super) fn build_prompt(repo_ctx: &RepoContext) -> String {
+pub(crate) fn build_prompt(repo_ctx: &RepoContext) -> String {
     let mut prompt = prompt_prefix(
         &repo_ctx.repo_name,
         &repo_ctx.branch_name,

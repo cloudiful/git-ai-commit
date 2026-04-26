@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub use self::provider::{
-    DEFAULT_OLLAMA_API_BASE, Provider, is_loopback_url, is_ollama_cloud_url, is_openrouter_url,
+    DEFAULT_OLLAMA_API_BASE, Provider, is_anthropic_compatible_url, is_loopback_url,
+    is_ollama_cloud_url, is_openrouter_url,
 };
 use self::sources::{ConfigSnapshot, load_config_snapshot};
 
@@ -281,10 +282,21 @@ impl ConfigSnapshot {
 }
 
 impl Config {
+    pub fn should_use_anthropic_transport(&self) -> bool {
+        self.provider == Provider::AnthropicCompatible
+            || (self.provider == Provider::OpenAiCompatible
+                && is_anthropic_compatible_url(&self.api_base))
+    }
+
     pub fn requires_api_key(&self) -> bool {
+        if self.should_use_anthropic_transport() {
+            return true;
+        }
+
         match self.provider {
             Provider::OpenAiCompatible => true,
             Provider::Ollama => self.is_ollama_cloud(),
+            Provider::AnthropicCompatible => true,
         }
     }
 
@@ -307,6 +319,14 @@ impl Config {
     }
 
     pub fn auth_mode_description(&self) -> String {
+        if self.should_use_anthropic_transport() {
+            return if self.api_key.trim().is_empty() {
+                "missing x-api-key".to_string()
+            } else {
+                "x-api-key".to_string()
+            };
+        }
+
         match self.provider {
             Provider::OpenAiCompatible => {
                 if self.api_key.trim().is_empty() {
@@ -315,6 +335,7 @@ impl Config {
                     "bearer token".to_string()
                 }
             }
+            Provider::AnthropicCompatible => "x-api-key".to_string(),
             Provider::Ollama if self.is_local_ollama() => {
                 if self.api_key.trim().is_empty() {
                     "none (local ollama)".to_string()

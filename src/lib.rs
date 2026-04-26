@@ -1,3 +1,4 @@
+mod anthropic;
 mod cli;
 mod commit;
 mod config;

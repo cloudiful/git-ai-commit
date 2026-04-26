@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use self::request::{
     ChatCompletionRequest, ChatMessage, ChatResponseFormat, ChatResponseFormatJsonSchema,
-    ResponseInputMessage, ResponsesRequest, build_prompt, chat_completions_url, responses_url,
+    ResponseInputMessage, ResponsesRequest, chat_completions_url, responses_url,
 };
 use self::response::{
     parse_chat_completion_response, parse_json_chat_completion_content, parse_responses_response,
@@ -23,7 +23,7 @@ use self::response::{
 use self::stream::StreamRenderer;
 
 pub(crate) use self::request::models_url;
-pub(crate) use self::request::{MAX_OUTPUT_TOKENS, SYSTEM_PROMPT, build_prompt_scaffold};
+pub(crate) use self::request::{MAX_OUTPUT_TOKENS, SYSTEM_PROMPT, build_prompt, build_prompt_scaffold};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GenerationMetrics {
@@ -371,6 +371,10 @@ pub fn generate_message_with_stream_output(
     stream_output: StreamOutput,
     debug_provider: bool,
 ) -> Result<(String, GenerationMetrics), String> {
+    if cfg.should_use_anthropic_transport() {
+        return crate::anthropic::generate_message(cfg, repo_ctx, stream_output, debug_provider);
+    }
+
     let client = new_http_client(cfg)?;
     let prompt = build_prompt(repo_ctx);
     let started = Instant::now();

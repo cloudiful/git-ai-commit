@@ -72,6 +72,11 @@ impl ProviderPromptProfile {
                 default_api_base: Some(DEFAULT_OLLAMA_API_BASE),
                 model_hint: "Example: llama3.2 or qwen3:8b",
             },
+            Provider::AnthropicCompatible => Self {
+                api_base_hint: "Example: https://api.deepseek.com/anthropic",
+                default_api_base: None,
+                model_hint: "Example: deepseek-chat",
+            },
         }
     }
 
@@ -79,6 +84,7 @@ impl ProviderPromptProfile {
         match provider {
             Provider::OpenAiCompatible => true,
             Provider::Ollama => is_ollama_cloud_url(api_base),
+            Provider::AnthropicCompatible => true,
         }
     }
 }
