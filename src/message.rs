@@ -111,8 +111,7 @@ fn truncate_subject(subject: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_SUBJECT_CHARS, sanitize_message, trim_to_utf8_bytes,
-        trim_with_notice_at_line_boundary,
+        MAX_SUBJECT_CHARS, sanitize_message, trim_to_utf8_bytes, trim_with_notice_at_line_boundary,
     };
 
     const DIFF_HUNK_TRUNCATED_NOTICE: &str = "[hunk truncated]\n";

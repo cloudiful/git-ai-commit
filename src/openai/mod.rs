@@ -2,7 +2,7 @@ mod request;
 mod response;
 mod stream;
 
-use crate::config::Config;
+use crate::config::{Config, DEFAULT_MAX_DIFF_TOKENS, MAX_AUTO_DIFF_TOKENS};
 use crate::message::validate_message;
 use reqwest::blocking::Client;
 use reqwest::blocking::RequestBuilder;
@@ -84,6 +84,7 @@ pub fn resolve_model_context_config(cfg: &Config, debug_provider: bool) -> Confi
     {
         let mut resolved = cfg.clone();
         resolved.model_context_tokens = Some(value);
+        apply_auto_diff_token_limit(&mut resolved, value);
         return resolved;
     }
 
@@ -94,6 +95,7 @@ pub fn resolve_model_context_config(cfg: &Config, debug_provider: bool) -> Confi
             }
             let mut resolved = cfg.clone();
             resolved.model_context_tokens = Some(value);
+            apply_auto_diff_token_limit(&mut resolved, value);
             resolved
         }
         Ok(None) | Err(_) => cfg.clone(),
@@ -203,10 +205,20 @@ fn truncate_debug_body(text: &str) -> String {
     }
 }
 
+fn apply_auto_diff_token_limit(cfg: &mut Config, model_context_tokens: usize) {
+    if cfg.max_diff_tokens_explicit {
+        return;
+    }
+
+    let suggested = (model_context_tokens / 4).clamp(DEFAULT_MAX_DIFF_TOKENS, MAX_AUTO_DIFF_TOKENS);
+    cfg.max_diff_tokens = Some(suggested);
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        detect_model_context_tokens, fetch_openrouter_model_context_tokens,
+        apply_auto_diff_token_limit, detect_model_context_tokens,
+        fetch_openrouter_model_context_tokens,
         resolve_model_context_config,
     };
     use crate::config::{Config, Provider};
@@ -246,6 +258,19 @@ mod tests {
     }
 
     #[test]
+    fn auto_raises_default_max_diff_tokens_up_to_cap() {
+        let mut cfg = sample_config(
+            "https://openrouter.ai/api/v1",
+            "deepseek/deepseek-v4-flash",
+            None,
+        );
+
+        apply_auto_diff_token_limit(&mut cfg, 1_048_576);
+
+        assert_eq!(cfg.max_diff_tokens, Some(64_000));
+    }
+
+    #[test]
     fn returns_none_when_model_missing_from_openrouter_catalog() {
         let (base, _requests, handle) = spawn_http_once(
             "200 OK",
@@ -258,6 +283,21 @@ mod tests {
 
         assert_eq!(detected, None);
         handle.join().expect("server thread");
+    }
+
+    #[test]
+    fn preserves_explicit_max_diff_tokens() {
+        let mut cfg = sample_config(
+            "https://openrouter.ai/api/v1",
+            "deepseek/deepseek-v4-flash",
+            Some(1_048_576),
+        );
+        cfg.max_diff_tokens = Some(20_000);
+        cfg.max_diff_tokens_explicit = true;
+
+        let resolved = resolve_model_context_config(&cfg, false);
+
+        assert_eq!(resolved.max_diff_tokens, Some(20_000));
     }
 
     fn sample_config(api_base: &str, model: &str, model_context_tokens: Option<usize>) -> Config {
@@ -274,6 +314,7 @@ mod tests {
             timeout: Duration::from_secs(5),
             max_diff_bytes: 60_000,
             max_diff_tokens: Some(16_000),
+            max_diff_tokens_explicit: false,
             model_context_tokens,
         }
     }

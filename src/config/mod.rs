@@ -15,6 +15,7 @@ use self::sources::{ConfigSnapshot, load_config_snapshot};
 pub const DEFAULT_TIMEOUT_SEC: u64 = 15;
 pub const DEFAULT_MAX_DIFF_BYTES: usize = 60_000;
 pub const DEFAULT_MAX_DIFF_TOKENS: usize = 16_000;
+pub const MAX_AUTO_DIFF_TOKENS: usize = 64_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiffBudgetConfig {
@@ -41,6 +42,7 @@ pub struct Config {
     pub timeout: Duration,
     pub max_diff_bytes: usize,
     pub max_diff_tokens: Option<usize>,
+    pub max_diff_tokens_explicit: bool,
     pub model_context_tokens: Option<usize>,
 }
 
@@ -99,6 +101,10 @@ pub fn load_partial_config() -> Result<Config, String> {
     } else {
         api_base
     };
+    let max_diff_tokens_explicit = snapshot.has_configured_value(
+        |values| values.max_diff_tokens.as_ref(),
+        |cfg| cfg.max_diff_tokens,
+    );
     Ok(Config {
         provider,
         api_base,
@@ -153,6 +159,7 @@ pub fn load_partial_config() -> Result<Config, String> {
             |cfg| cfg.max_diff_tokens,
             DEFAULT_MAX_DIFF_TOKENS,
         )?),
+        max_diff_tokens_explicit,
         model_context_tokens: snapshot.optional_int_value(
             "ai.commit.modelContextTokens",
             |values| values.model_context_tokens.as_ref(),
@@ -201,6 +208,16 @@ impl ConfigSnapshot {
             .or_else(|| raw_getter(&self.git).cloned())
             .or_else(|| self.file.as_ref().and_then(|cfg| file_getter(cfg).cloned()))
             .unwrap_or_default()
+    }
+
+    pub(super) fn has_configured_value(
+        &self,
+        raw_getter: impl Fn(&RawConfigValues) -> Option<&String>,
+        file_getter: impl Fn(&FileConfig) -> Option<usize>,
+    ) -> bool {
+        raw_getter(&self.env).is_some()
+            || raw_getter(&self.git).is_some()
+            || self.file.as_ref().and_then(file_getter).is_some()
     }
 
     pub(super) fn bool_value(

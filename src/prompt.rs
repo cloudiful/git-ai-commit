@@ -435,6 +435,7 @@ mod tests {
             timeout: Duration::from_secs(5),
             max_diff_bytes: 60_000,
             max_diff_tokens: Some(16_000),
+            max_diff_tokens_explicit: false,
             model_context_tokens: None,
         }
     }
