@@ -32,6 +32,13 @@ fn openrouter_context_cache() -> &'static Mutex<HashMap<(String, String), usize>
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[cfg(test)]
+fn clear_openrouter_context_cache() {
+    if let Ok(mut cache) = openrouter_context_cache().lock() {
+        cache.clear();
+    }
+}
+
 pub(crate) fn resolve_model_context_config(cfg: &Config, debug_provider: bool) -> Config {
     if !cfg.should_auto_detect_model_context_tokens() {
         return cfg.clone();
@@ -167,7 +174,7 @@ fn apply_auto_diff_token_limit(cfg: &mut Config, model_context_tokens: usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_auto_diff_token_limit, detect_model_context_tokens,
+        apply_auto_diff_token_limit, clear_openrouter_context_cache,
         fetch_openrouter_model_context_tokens, resolve_model_context_config,
     };
     use crate::config::{Config, Provider};
@@ -179,6 +186,7 @@ mod tests {
 
     #[test]
     fn fetches_openrouter_model_context_tokens() {
+        clear_openrouter_context_cache();
         let (base, _requests, handle) = spawn_http_once(
             "200 OK",
             "application/json",
@@ -195,6 +203,7 @@ mod tests {
 
     #[test]
     fn preserves_explicit_model_context_tokens() {
+        clear_openrouter_context_cache();
         let cfg = sample_config(
             "https://openrouter.ai/api/v1",
             "google/gemma-4-31b-it:free",
@@ -208,6 +217,7 @@ mod tests {
 
     #[test]
     fn auto_raises_default_max_diff_tokens_up_to_cap() {
+        clear_openrouter_context_cache();
         let mut cfg = sample_config(
             "https://openrouter.ai/api/v1",
             "deepseek/deepseek-v4-flash",
@@ -221,6 +231,7 @@ mod tests {
 
     #[test]
     fn returns_none_when_model_missing_from_openrouter_catalog() {
+        clear_openrouter_context_cache();
         let (base, _requests, handle) = spawn_http_once(
             "200 OK",
             "application/json",
@@ -228,7 +239,8 @@ mod tests {
         );
         let cfg = sample_config(&base, "google/gemma-4-31b-it:free", None);
 
-        let detected = detect_model_context_tokens(&cfg, false).expect("lookup result");
+        let detected =
+            fetch_openrouter_model_context_tokens(&cfg, false).expect("lookup result");
 
         assert_eq!(detected, None);
         handle.join().expect("server thread");
@@ -236,6 +248,7 @@ mod tests {
 
     #[test]
     fn preserves_explicit_max_diff_tokens() {
+        clear_openrouter_context_cache();
         let mut cfg = sample_config(
             "https://openrouter.ai/api/v1",
             "deepseek/deepseek-v4-flash",
@@ -286,6 +299,12 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let handle = thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept connection");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("set read timeout");
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .expect("set write timeout");
             let mut buffer = [0u8; 4096];
             let bytes_read = stream.read(&mut buffer).expect("read request");
             tx.send(String::from_utf8_lossy(&buffer[..bytes_read]).into_owned())
