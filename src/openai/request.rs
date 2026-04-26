@@ -42,7 +42,8 @@ pub(super) struct ChatMessage {
 pub(super) struct ChatResponseFormat {
     #[serde(rename = "type")]
     pub(super) format_type: &'static str,
-    pub(super) json_schema: ChatResponseFormatJsonSchema,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) json_schema: Option<ChatResponseFormatJsonSchema>,
 }
 
 #[derive(Serialize)]

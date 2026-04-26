@@ -65,6 +65,12 @@ struct StructuredCommitMessage {
     body: Vec<String>,
 }
 
+#[derive(Clone, Copy)]
+enum StructuredMode {
+    JsonSchema,
+    JsonObject,
+}
+
 fn env_debug_provider_enabled() -> bool {
     matches!(
         std::env::var("GIT_AI_COMMIT_DEBUG_PROVIDER")
@@ -369,17 +375,51 @@ pub fn generate_message_with_stream_output(
     let prompt = build_prompt(repo_ctx);
     let started = Instant::now();
     let mut renderer = StreamRenderer::new(stream_output);
-    if let Ok(message) =
-        generate_structured_message_via_chat_completions(cfg, &client, &prompt, debug_provider)
-    {
-        renderer.push(&message).map_err(|err| err.to_string())?;
-        renderer.finish().map_err(|err| err.to_string())?;
-        let metrics = GenerationMetrics {
-            api_duration: started.elapsed(),
-        };
-        validate_message(&message)?;
-        return Ok((message, metrics));
+    let debug_enabled = debug_provider || env_debug_provider_enabled();
+    match generate_structured_message_via_chat_completions(cfg, &client, &prompt, debug_provider) {
+        Ok(message) => {
+            if debug_enabled {
+                eprintln!("git-ai-commit: provider debug: structured output accepted");
+            }
+            renderer.push(&message).map_err(|err| err.to_string())?;
+            renderer.finish().map_err(|err| err.to_string())?;
+            let metrics = GenerationMetrics {
+                api_duration: started.elapsed(),
+            };
+            validate_message(&message)?;
+            return Ok((message, metrics));
+        }
+        Err(err) => {
+            if debug_enabled {
+                eprintln!(
+                    "git-ai-commit: provider debug: structured output failed, falling back to plain chat: {}",
+                    err
+                );
+            }
+        }
     }
+
+    match generate_message_via_chat_completions(cfg, &client, &prompt, &mut renderer, debug_provider)
+    {
+        Ok(message) => {
+            renderer.finish().map_err(|err| err.to_string())?;
+            let metrics = GenerationMetrics {
+                api_duration: started.elapsed(),
+            };
+            validate_message(&message)?;
+            return Ok((message, metrics));
+        }
+        Err(err) => {
+            if debug_enabled {
+                eprintln!(
+                    "git-ai-commit: provider debug: plain chat failed, falling back to responses: {}",
+                    err
+                );
+            }
+            renderer.reset();
+        }
+    }
+
     let message = match generate_message_via_responses(
         cfg,
         &client,
@@ -390,16 +430,7 @@ pub fn generate_message_with_stream_output(
         Ok(message) => message,
         Err(err) if err.should_fallback => {
             renderer.reset();
-            generate_message_via_chat_completions(
-                cfg,
-                &client,
-                &prompt,
-                &mut renderer,
-                debug_provider,
-            )
-            .map_err(|fallback_err| {
-                format!("{fallback_err} (responses fallback: {})", err.message)
-            })?
+            return Err(err.message);
         }
         Err(err) => return Err(err.message),
     };
@@ -557,6 +588,39 @@ fn generate_structured_message_via_chat_completions(
     prompt: &str,
     debug_provider: bool,
 ) -> Result<String, String> {
+    match generate_structured_message_via_chat_completions_mode(
+        cfg,
+        client,
+        prompt,
+        debug_provider,
+        StructuredMode::JsonSchema,
+    ) {
+        Ok(message) => Ok(message),
+        Err(err) if supports_json_object_only(&err) => {
+            if debug_provider || env_debug_provider_enabled() {
+                eprintln!(
+                    "git-ai-commit: provider debug: structured mode json_schema unsupported, retrying with json_object"
+                );
+            }
+            generate_structured_message_via_chat_completions_mode(
+                cfg,
+                client,
+                prompt,
+                debug_provider,
+                StructuredMode::JsonObject,
+            )
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn generate_structured_message_via_chat_completions_mode(
+    cfg: &Config,
+    client: &Client,
+    prompt: &str,
+    debug_provider: bool,
+    mode: StructuredMode,
+) -> Result<String, String> {
     let debug_enabled = debug_provider || env_debug_provider_enabled();
     let request = ChatCompletionRequest {
         model: cfg.model.clone(),
@@ -573,32 +637,19 @@ fn generate_structured_message_via_chat_completions(
         temperature: 0.1,
         max_tokens: MAX_OUTPUT_TOKENS as u32,
         stream: false,
-        response_format: Some(ChatResponseFormat {
-            format_type: "json_schema",
-            json_schema: ChatResponseFormatJsonSchema {
-                name: "git_commit_message",
-                strict: true,
-                schema: json!({
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "subject": { "type": "string" },
-                        "body": {
-                            "type": "array",
-                            "items": { "type": "string" }
-                        }
-                    },
-                    "required": ["subject", "body"]
-                }),
-            },
-        }),
+        response_format: Some(structured_response_format(mode)),
     };
 
     if debug_enabled {
         eprintln!(
-            "git-ai-commit: provider debug: POST {} model={} stream=false response_format=json_schema",
+            "git-ai-commit: provider debug: POST {} model={} stream=false response_format={}",
             chat_completions_url(&cfg.api_base),
             cfg.model
+            ,
+            match mode {
+                StructuredMode::JsonSchema => "json_schema",
+                StructuredMode::JsonObject => "json_object",
+            }
         );
     }
 
@@ -614,4 +665,38 @@ fn generate_structured_message_via_chat_completions(
     let structured: StructuredCommitMessage = serde_json::from_str(&content)
         .map_err(|err| format!("invalid structured commit message payload: {err}"))?;
     format_commit_message(&structured.subject, &structured.body)
+}
+
+fn structured_response_format(mode: StructuredMode) -> ChatResponseFormat {
+    match mode {
+        StructuredMode::JsonSchema => ChatResponseFormat {
+            format_type: "json_schema",
+            json_schema: Some(ChatResponseFormatJsonSchema {
+                name: "git_commit_message",
+                strict: true,
+                schema: json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "subject": { "type": "string" },
+                        "body": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        }
+                    },
+                    "required": ["subject", "body"]
+                }),
+            }),
+        },
+        StructuredMode::JsonObject => ChatResponseFormat {
+            format_type: "json_object",
+            json_schema: None,
+        },
+    }
+}
+
+fn supports_json_object_only(error: &str) -> bool {
+    let lowered = error.to_ascii_lowercase();
+    lowered.contains("does not support 'json_schema'")
+        && lowered.contains("supported formats: json_object")
 }
