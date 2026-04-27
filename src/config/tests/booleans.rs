@@ -43,6 +43,20 @@ fn accepts_false_git_style_boolean_values_from_git_config() {
 }
 
 #[test]
+fn accepts_redaction_rule_booleans_from_env_and_git_config() {
+    let mut env = TestConfigEnv::new();
+    env.set_required_openai_env();
+    env.write_git_config("ai.commit.redaction.domain", "off");
+    env.write_git_config("ai.commit.redaction.person", "on");
+    env.set_env("GIT_AI_COMMIT_REDACTION_PERSON", Some("false"));
+
+    let cfg = load_config().expect("expected config");
+
+    assert!(!cfg.redaction_rules.domain);
+    assert!(!cfg.redaction_rules.person);
+}
+
+#[test]
 fn rejects_invalid_boolean_value() {
     let mut env = TestConfigEnv::new();
     env.set_required_openai_env();
@@ -51,4 +65,14 @@ fn rejects_invalid_boolean_value() {
 
     let err = load_config().expect_err("expected invalid bool error");
     assert!(err.contains("invalid ai.commit.confirmCommit value"));
+}
+
+#[test]
+fn rejects_invalid_redaction_rule_boolean_value() {
+    let mut env = TestConfigEnv::new();
+    env.set_required_openai_env();
+    env.set_env("GIT_AI_COMMIT_REDACTION_DOMAIN", Some("maybe"));
+
+    let err = load_config().expect_err("expected invalid bool error");
+    assert!(err.contains("invalid ai.commit.redaction.domain value"));
 }

@@ -12,6 +12,8 @@ fn defaults_confirm_commit_to_true_and_open_editor_to_false() {
     assert!(!cfg.open_editor);
     assert_eq!(cfg.max_diff_tokens, Some(16_000));
     assert_eq!(cfg.model_context_tokens, None);
+    assert!(cfg.redaction_rules.domain);
+    assert!(!cfg.redaction_rules.person);
 }
 
 #[test]

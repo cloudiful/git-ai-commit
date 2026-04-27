@@ -51,3 +51,24 @@ fn reads_redact_secrets_from_file_config() {
     let cfg = load_partial_config().expect("expected config from file");
     assert!(!cfg.redact_secrets);
 }
+
+#[test]
+fn reads_redaction_rules_from_file_config() {
+    let mut env = TestConfigEnv::new();
+    env.write_config_file(
+        r#"{
+  "api_base": "https://example.com/v1",
+  "api_key": "token",
+  "model": "gpt-4.1-mini",
+  "redaction_rules": {
+    "domain": false,
+    "person": true
+  }
+}"#,
+    );
+
+    let cfg = load_partial_config().expect("expected config from file");
+    assert!(!cfg.redaction_rules.domain);
+    assert!(cfg.redaction_rules.person);
+    assert!(cfg.redaction_rules.secret);
+}

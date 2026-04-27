@@ -436,6 +436,7 @@ mod tests {
             confirm_commit: true,
             open_editor: false,
             redact_secrets: true,
+            redaction_rules: crate::config::default_redaction_rules(),
             show_timing: true,
             use_env_proxy: false,
             timeout: Duration::from_secs(5),

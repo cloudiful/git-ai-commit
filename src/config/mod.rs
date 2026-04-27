@@ -4,6 +4,7 @@ mod sources;
 #[cfg(test)]
 mod tests;
 
+use redactor::{FindingKind, RedactionRules};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -38,6 +39,7 @@ pub struct Config {
     pub confirm_commit: bool,
     pub open_editor: bool,
     pub redact_secrets: bool,
+    pub redaction_rules: RedactionRules,
     pub show_timing: bool,
     pub use_env_proxy: bool,
     pub timeout: Duration,
@@ -56,12 +58,26 @@ pub(super) struct FileConfig {
     pub(super) confirm_commit: Option<bool>,
     pub(super) open_editor: Option<bool>,
     pub(super) redact_secrets: Option<bool>,
+    pub(super) redaction_rules: Option<FileRedactionRules>,
     pub(super) show_timing: Option<bool>,
     pub(super) use_env_proxy: Option<bool>,
     pub(super) timeout_sec: Option<usize>,
     pub(super) max_diff_bytes: Option<usize>,
     pub(super) max_diff_tokens: Option<usize>,
     pub(super) model_context_tokens: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub(super) struct FileRedactionRules {
+    pub(super) secret: Option<bool>,
+    pub(super) domain: Option<bool>,
+    pub(super) url: Option<bool>,
+    pub(super) email: Option<bool>,
+    pub(super) ip: Option<bool>,
+    pub(super) cidr: Option<bool>,
+    pub(super) phone: Option<bool>,
+    pub(super) person: Option<bool>,
+    pub(super) organization: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -73,6 +89,15 @@ pub(super) struct RawConfigValues {
     pub(super) confirm_commit: Option<String>,
     pub(super) open_editor: Option<String>,
     pub(super) redact_secrets: Option<String>,
+    pub(super) redaction_secret: Option<String>,
+    pub(super) redaction_domain: Option<String>,
+    pub(super) redaction_url: Option<String>,
+    pub(super) redaction_email: Option<String>,
+    pub(super) redaction_ip: Option<String>,
+    pub(super) redaction_cidr: Option<String>,
+    pub(super) redaction_phone: Option<String>,
+    pub(super) redaction_person: Option<String>,
+    pub(super) redaction_organization: Option<String>,
     pub(super) show_timing: Option<String>,
     pub(super) use_env_proxy: Option<String>,
     pub(super) timeout_sec: Option<String>,
@@ -130,6 +155,7 @@ pub fn load_partial_config() -> Result<Config, String> {
             |cfg| cfg.redact_secrets,
             true,
         )?,
+        redaction_rules: snapshot.redaction_rules()?,
         show_timing: snapshot.bool_value(
             "ai.commit.showTiming",
             |values| values.show_timing.as_ref(),
@@ -279,6 +305,89 @@ impl ConfigSnapshot {
 
         Ok(None)
     }
+
+    pub(super) fn redaction_rules(&self) -> Result<RedactionRules, String> {
+        let mut rules = default_redaction_rules();
+        rules.secret = self.redaction_rule_value(
+            "ai.commit.redaction.secret",
+            |values| values.redaction_secret.as_ref(),
+            |rules| rules.secret,
+            rules.secret,
+        )?;
+        rules.domain = self.redaction_rule_value(
+            "ai.commit.redaction.domain",
+            |values| values.redaction_domain.as_ref(),
+            |rules| rules.domain,
+            rules.domain,
+        )?;
+        rules.url = self.redaction_rule_value(
+            "ai.commit.redaction.url",
+            |values| values.redaction_url.as_ref(),
+            |rules| rules.url,
+            rules.url,
+        )?;
+        rules.email = self.redaction_rule_value(
+            "ai.commit.redaction.email",
+            |values| values.redaction_email.as_ref(),
+            |rules| rules.email,
+            rules.email,
+        )?;
+        rules.ip = self.redaction_rule_value(
+            "ai.commit.redaction.ip",
+            |values| values.redaction_ip.as_ref(),
+            |rules| rules.ip,
+            rules.ip,
+        )?;
+        rules.cidr = self.redaction_rule_value(
+            "ai.commit.redaction.cidr",
+            |values| values.redaction_cidr.as_ref(),
+            |rules| rules.cidr,
+            rules.cidr,
+        )?;
+        rules.phone = self.redaction_rule_value(
+            "ai.commit.redaction.phone",
+            |values| values.redaction_phone.as_ref(),
+            |rules| rules.phone,
+            rules.phone,
+        )?;
+        rules.person = self.redaction_rule_value(
+            "ai.commit.redaction.person",
+            |values| values.redaction_person.as_ref(),
+            |rules| rules.person,
+            rules.person,
+        )?;
+        rules.organization = self.redaction_rule_value(
+            "ai.commit.redaction.organization",
+            |values| values.redaction_organization.as_ref(),
+            |rules| rules.organization,
+            rules.organization,
+        )?;
+        Ok(rules)
+    }
+
+    fn redaction_rule_value(
+        &self,
+        config_key: &str,
+        raw_getter: impl Fn(&RawConfigValues) -> Option<&String>,
+        file_getter: impl Fn(&FileRedactionRules) -> Option<bool>,
+        fallback: bool,
+    ) -> Result<bool, String> {
+        if let Some(raw) = raw_getter(&self.env).or_else(|| raw_getter(&self.git)) {
+            return sources::parse_git_bool(raw)
+                .ok_or_else(|| format!("invalid {config_key} value {:?}", raw));
+        }
+
+        Ok(self
+            .file
+            .as_ref()
+            .and_then(|cfg| cfg.redaction_rules.as_ref())
+            .and_then(file_getter)
+            .unwrap_or(fallback))
+    }
+}
+
+pub fn default_redaction_rules() -> RedactionRules {
+    RedactionRules::default().with_kind(FindingKind::Domain, true)
 }
 
 impl Config {

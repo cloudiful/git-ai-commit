@@ -1,5 +1,4 @@
-use redactor::{InputKind, Redactor, RedactorBuilder};
-use std::sync::OnceLock;
+use redactor::{InputKind, RedactionRules, RedactorBuilder};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RedactionEntry {
@@ -18,12 +17,16 @@ pub struct RedactionResult {
     pub entries: Vec<RedactionEntry>,
 }
 
-pub fn redact_diff_for_prompt(diff: &str) -> RedactionResult {
+pub fn redact_diff_for_prompt(diff: &str, rules: RedactionRules) -> RedactionResult {
     if diff.trim().is_empty() {
         return RedactionResult::default();
     }
 
-    match redactor().redact_artifact_with_input_kind(diff, InputKind::GitDiff) {
+    match RedactorBuilder::new()
+        .with_redaction_rules(rules)
+        .build()
+        .redact_artifact_with_input_kind(diff, InputKind::GitDiff)
+    {
         Ok(artifact) => RedactionResult {
             text: artifact.result.redacted_text,
             replacement_occurrences: artifact.result.stats.applied_replacements,
@@ -46,9 +49,4 @@ pub fn redact_diff_for_prompt(diff: &str) -> RedactionResult {
             ..RedactionResult::default()
         },
     }
-}
-
-fn redactor() -> &'static Redactor {
-    static REDACTOR: OnceLock<Redactor> = OnceLock::new();
-    REDACTOR.get_or_init(|| RedactorBuilder::new().build())
 }

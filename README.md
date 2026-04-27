@@ -101,6 +101,34 @@ git-ai-commit doctor
 - `--show-redactions`: print detailed redaction entries; by default only the redaction summary count is shown.
 - Interactive confirm prompt: use `y` to commit now, `e` to open the generated message in your editor before committing, or `n`/Enter to cancel.
 
+## Redaction
+
+Staged diffs are redacted before model requests by default. Turn all redaction off with:
+
+```sh
+git config --global ai.commit.redactSecrets false
+```
+
+Individual finding kinds can be enabled or disabled:
+
+```sh
+git config --global ai.commit.redaction.domain true
+git config --global ai.commit.redaction.person false
+```
+
+Config file form:
+
+```json
+{
+  "redaction_rules": {
+    "domain": true,
+    "person": false
+  }
+}
+```
+
+Supported rule keys: `secret`, `domain`, `url`, `email`, `ip`, `cidr`, `phone`, `person`, `organization`.
+
 ## Model Context Tokens
 
 `ai.commit.modelContextTokens` lets diff sampling clamp itself against the model's total context window.

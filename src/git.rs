@@ -54,7 +54,7 @@ pub fn collect_repo_context(cfg: &Config) -> Result<RepoContext, String> {
         .unwrap_or_else(|| repo_root.clone());
     let budget = resolve_diff_budget(cfg.diff_budget(), &repo_name, &branch_name, files.len())?;
     let redacted_diff = if cfg.redact_secrets {
-        redact_diff_for_prompt(&diff_patch)
+        redact_diff_for_prompt(&diff_patch, cfg.redaction_rules)
     } else {
         RedactionResult {
             text: diff_patch,
