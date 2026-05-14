@@ -6,22 +6,22 @@ mod structured;
 
 use crate::config::Config;
 use crate::message::validate_message;
-use crate::provider_transport::{AnthropicTransport, CommitMessageTransport, OpenAiTransport};
 use crate::provider_common::{new_http_client, provider_debug_enabled};
+use crate::provider_transport::{AnthropicTransport, CommitMessageTransport, OpenAiTransport};
 use reqwest::blocking::Client;
 use reqwest::blocking::RequestBuilder;
 use std::time::{Duration, Instant};
 
+pub(crate) use self::request::models_url;
 use self::request::{
-    ChatCompletionRequest, ChatMessage, ResponseInputMessage, ResponsesRequest, chat_completions_url,
-    responses_url,
+    ChatCompletionRequest, ChatMessage, ResponseInputMessage, ResponsesRequest,
+    chat_completions_url, responses_url,
+};
+pub(crate) use self::request::{
+    MAX_OUTPUT_TOKENS, SYSTEM_PROMPT, build_prompt, build_prompt_scaffold,
 };
 use self::response::{
     parse_chat_completion_response, parse_responses_response, should_fallback_from_responses,
-};
-pub(crate) use self::request::models_url;
-pub(crate) use self::request::{
-    MAX_OUTPUT_TOKENS, SYSTEM_PROMPT, build_prompt, build_prompt_scaffold,
 };
 pub(crate) use self::stream::StreamRenderer;
 pub(crate) use context::{detect_model_context_tokens, resolve_model_context_config};
@@ -73,31 +73,45 @@ pub(crate) fn generate_openai_message_with_stream_output(
     let started = Instant::now();
     let mut renderer = StreamRenderer::new(stream_output);
     let debug_enabled = provider_debug_enabled(debug_provider);
-    match structured::generate_structured_message_via_chat_completions(cfg, &client, &prompt, debug_provider) {
-        Ok(message) => {
-            if debug_enabled {
-                eprintln!("git-ai-commit: provider debug: structured output accepted");
+    if !renderer.enabled() {
+        match structured::generate_structured_message_via_chat_completions(
+            cfg,
+            &client,
+            &prompt,
+            debug_provider,
+        ) {
+            Ok(message) => {
+                if debug_enabled {
+                    eprintln!("git-ai-commit: provider debug: structured output accepted");
+                }
+                renderer.push(&message).map_err(|err| err.to_string())?;
+                renderer.finish().map_err(|err| err.to_string())?;
+                let metrics = GenerationMetrics {
+                    api_duration: started.elapsed(),
+                };
+                validate_message(&message)?;
+                return Ok((message, metrics));
             }
-            renderer.push(&message).map_err(|err| err.to_string())?;
-            renderer.finish().map_err(|err| err.to_string())?;
-            let metrics = GenerationMetrics {
-                api_duration: started.elapsed(),
-            };
-            validate_message(&message)?;
-            return Ok((message, metrics));
-        }
-        Err(err) => {
-            if debug_enabled {
-                eprintln!(
-                    "git-ai-commit: provider debug: structured output failed, falling back to plain chat: {}",
-                    err
-                );
+            Err(err) => {
+                if debug_enabled {
+                    eprintln!(
+                        "git-ai-commit: provider debug: structured output failed, falling back to plain chat: {}",
+                        err
+                    );
+                }
             }
         }
+    } else if debug_enabled {
+        eprintln!("git-ai-commit: provider debug: streaming enabled, skipping structured output");
     }
 
-    match generate_message_via_chat_completions(cfg, &client, &prompt, &mut renderer, debug_provider)
-    {
+    match generate_message_via_chat_completions(
+        cfg,
+        &client,
+        &prompt,
+        &mut renderer,
+        debug_provider,
+    ) {
         Ok(message) => {
             renderer.finish().map_err(|err| err.to_string())?;
             let metrics = GenerationMetrics {
