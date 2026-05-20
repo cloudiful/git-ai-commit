@@ -42,7 +42,11 @@ pub(crate) fn generate_anthropic_message_with_stream_output(
             url,
             cfg.model,
             ANTHROPIC_VERSION,
-            request.thinking.as_ref().map(|cfg| cfg.kind).unwrap_or("default")
+            request
+                .thinking
+                .as_ref()
+                .map(|cfg| cfg.kind)
+                .unwrap_or("default")
         );
     }
     let response = apply_auth(client.post(&url), cfg)

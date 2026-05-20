@@ -387,7 +387,15 @@ impl ConfigSnapshot {
 }
 
 pub fn default_redaction_rules() -> RedactionRules {
-    RedactionRules::default().with_kind(FindingKind::Domain, true)
+    RedactionRules::default()
+        .with_kind(FindingKind::Secret, true)
+        .with_kind(FindingKind::Domain, true)
+        .with_kind(FindingKind::Url, true)
+        .with_kind(FindingKind::Email, true)
+        .with_kind(FindingKind::Ip, true)
+        .with_kind(FindingKind::Cidr, true)
+        .with_kind(FindingKind::Phone, true)
+        .with_kind(FindingKind::Organization, true)
 }
 
 impl Config {

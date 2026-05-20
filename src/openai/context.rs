@@ -239,8 +239,7 @@ mod tests {
         );
         let cfg = sample_config(&base, "google/gemma-4-31b-it:free", None);
 
-        let detected =
-            fetch_openrouter_model_context_tokens(&cfg, false).expect("lookup result");
+        let detected = fetch_openrouter_model_context_tokens(&cfg, false).expect("lookup result");
 
         assert_eq!(detected, None);
         handle.join().expect("server thread");

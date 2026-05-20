@@ -6,7 +6,11 @@ use std::path::Path;
 const CAI_ALIAS_VALUE: &str = r#"!f() { git ai-commit "$@"; }; f"#;
 
 #[derive(Parser)]
-#[command(name = "git-ai-commit init-alias", disable_help_flag = true, disable_version_flag = true)]
+#[command(
+    name = "git-ai-commit init-alias",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
 struct InitAliasCli {
     #[arg(long)]
     force: bool,
