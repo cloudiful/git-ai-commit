@@ -1,4 +1,4 @@
-use crate::commit::{run_commit, run_doctor, run_init_alias};
+use crate::commit::{run_commit, run_doctor};
 use crate::generate::run_generate;
 use clap::{Args, Parser, Subcommand};
 
@@ -12,15 +12,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Generate,
-    InitAlias(InitAliasArgs),
     Doctor,
     Commit(CommitArgs),
-}
-
-#[derive(Args)]
-struct InitAliasArgs {
-    #[arg(long)]
-    force: bool,
 }
 
 #[derive(Args)]
@@ -42,14 +35,6 @@ pub async fn run(args: Vec<String>) -> Result<(), String> {
 
     match cli.command {
         Commands::Generate => run_generate().await,
-        Commands::InitAlias(InitAliasArgs { force }) => {
-            let args = if force {
-                vec!["--force".to_string()]
-            } else {
-                Vec::new()
-            };
-            run_init_alias(&args)
-        }
         Commands::Doctor => run_doctor(&[]).await,
         Commands::Commit(CommitArgs { args }) => run_commit(&args).await,
     }

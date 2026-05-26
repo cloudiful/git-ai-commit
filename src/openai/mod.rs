@@ -11,8 +11,9 @@ use async_openai::config::Config as AsyncOpenAiConfig;
 use async_openai::types::chat::{
     ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
     ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs,
+    CreateChatCompletionRequest, ChatCompletionResponseStream,
 };
-use async_openai::types::responses::{CreateResponseArgs, InputParam, ResponseStream};
+use async_openai::types::responses::{CreateResponse, CreateResponseArgs, InputParam, ResponseStream};
 use futures::StreamExt;
 use reqwest::RequestBuilder;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
@@ -23,9 +24,11 @@ pub(crate) use self::request::models_url;
 pub(crate) use self::request::{MAX_OUTPUT_TOKENS, SYSTEM_PROMPT, build_prompt, build_prompt_scaffold};
 pub(crate) use self::stream::StreamRenderer;
 pub(crate) use context::{detect_model_context_tokens, resolve_model_context_config};
+use request::ApiEndpointPreference;
 use response::{
-    append_response_stream_event_text, extract_chat_message, extract_response_text,
-    should_fallback_from_responses_message,
+    ResponseTextAccumulator, append_response_stream_event_text, extract_chat_message,
+    extract_response_text, should_fallback_from_responses_message,
+    should_retry_without_stream_message,
 };
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -37,7 +40,6 @@ pub struct GenerationMetrics {
 pub enum StreamOutput {
     None,
     Stdout,
-    Stderr,
 }
 
 #[derive(Clone, Debug)]
@@ -112,40 +114,48 @@ pub(crate) async fn generate_openai_message_with_stream_output(
     stream_output: StreamOutput,
     debug_provider: bool,
 ) -> Result<(String, GenerationMetrics), String> {
-    let client = new_openai_client(cfg)?;
     let prompt = build_prompt(repo_ctx);
     let started = Instant::now();
     let mut renderer = StreamRenderer::new(stream_output);
     let debug_enabled = provider_debug_enabled(debug_provider);
 
-    let message = match generate_message_via_responses(
-        cfg,
-        &client,
-        &prompt,
-        &mut renderer,
-        debug_provider,
-    )
-    .await
-    {
-        Ok(message) => message,
-        Err(err) if err.should_fallback => {
-            if debug_enabled {
-                eprintln!(
-                    "git-ai-commit: provider debug: responses unsupported, falling back to chat/completions: {}",
-                    err.message
-                );
-            }
-            renderer.reset();
-            generate_message_via_chat_completions(
-                cfg,
-                &client,
-                &prompt,
-                &mut renderer,
-                debug_provider,
-            )
-            .await?
+    let message = match request::endpoint_preference(&cfg.api_base) {
+        ApiEndpointPreference::ResponsesOnly => {
+            generate_message_via_responses(cfg, &prompt, &mut renderer, debug_provider)
+                .await
+                .map_err(|err| err.message)?
         }
-        Err(err) => return Err(err.message),
+        ApiEndpointPreference::ChatCompletionsOnly => {
+            generate_message_via_chat_completions(cfg, &prompt, &mut renderer, debug_provider)
+                .await?
+        }
+        ApiEndpointPreference::Auto => match generate_message_via_responses(
+            cfg,
+            &prompt,
+            &mut renderer,
+            debug_provider,
+        )
+        .await
+        {
+            Ok(message) => message,
+            Err(err) if err.should_fallback => {
+                if debug_enabled {
+                    eprintln!(
+                        "git-ai-commit: provider debug: responses failed, falling back to chat/completions: {}",
+                        err.message
+                    );
+                }
+                renderer.reset();
+                generate_message_via_chat_completions(
+                    cfg,
+                    &prompt,
+                    &mut renderer,
+                    debug_provider,
+                )
+                .await?
+            }
+            Err(err) => return Err(err.message),
+        },
     };
 
     renderer.finish().map_err(|err| err.to_string())?;
@@ -177,13 +187,73 @@ pub(crate) fn new_openai_client(cfg: &Config) -> Result<Client<OpenAiCompatibleC
 
 async fn generate_message_via_responses(
     cfg: &Config,
-    client: &Client<OpenAiCompatibleConfig>,
     prompt: &str,
     renderer: &mut StreamRenderer,
     debug_provider: bool,
 ) -> Result<String, ApiAttemptError> {
     let debug_enabled = provider_debug_enabled(debug_provider);
-    let request = CreateResponseArgs::default()
+    let request = build_responses_request(cfg, prompt)?;
+
+    if renderer.enabled() {
+        match run_responses_stream_once(cfg, request.clone(), renderer, debug_enabled).await {
+            Ok(message) => Ok(message),
+            Err(err) if should_retry_without_stream_message(&err.message) => {
+                if debug_enabled {
+                    eprintln!(
+                        "git-ai-commit: provider debug: responses stream failed, retrying without stream: {}",
+                        err.message
+                    );
+                }
+                match run_responses_non_stream_once(cfg, request, debug_enabled).await {
+                    Ok(message) => Ok(message),
+                    Err(err) => Err(ApiAttemptError {
+                        message: err.message,
+                        should_fallback: true,
+                    }),
+                }
+            }
+            Err(err) => Err(err),
+        }
+    } else {
+        run_responses_non_stream_once(cfg, request, debug_enabled)
+            .await
+            .map_err(|err| ApiAttemptError {
+                message: err.message,
+                should_fallback: true,
+            })
+    }
+}
+
+async fn generate_message_via_chat_completions(
+    cfg: &Config,
+    prompt: &str,
+    renderer: &mut StreamRenderer,
+    debug_provider: bool,
+) -> Result<String, String> {
+    let debug_enabled = provider_debug_enabled(debug_provider);
+    let request = build_chat_request(cfg, prompt)?;
+
+    if renderer.enabled() {
+        match run_chat_stream_once(cfg, request.clone(), renderer, debug_enabled).await {
+            Ok(message) => Ok(message),
+            Err(err) if should_retry_without_stream_message(&err) => {
+                if debug_enabled {
+                    eprintln!(
+                        "git-ai-commit: provider debug: chat.completions stream failed, retrying without stream: {}",
+                        err
+                    );
+                }
+                run_chat_non_stream_once(cfg, request, debug_enabled).await
+            }
+            Err(err) => Err(err),
+        }
+    } else {
+        run_chat_non_stream_once(cfg, request, debug_enabled).await
+    }
+}
+
+fn build_responses_request(cfg: &Config, prompt: &str) -> Result<CreateResponse, ApiAttemptError> {
+    CreateResponseArgs::default()
         .model(&cfg.model)
         .instructions(SYSTEM_PROMPT)
         .input(InputParam::Text(prompt.to_string()))
@@ -192,45 +262,10 @@ async fn generate_message_via_responses(
         .map_err(|err| ApiAttemptError {
             message: err.to_string(),
             should_fallback: false,
-        })?;
-
-    if debug_enabled {
-        eprintln!(
-            "git-ai-commit: provider debug: POST {} model={} stream={}",
-            request::responses_url(&cfg.api_base),
-            cfg.model,
-            renderer.enabled()
-        );
-    }
-
-    if renderer.enabled() {
-        let stream = client
-            .responses()
-            .create_stream(request)
-            .await
-            .map_err(openai_error_to_attempt_error)?;
-        collect_response_stream(stream, renderer, debug_enabled).await
-    } else {
-        let response = client
-            .responses()
-            .create(request)
-            .await
-            .map_err(openai_error_to_attempt_error)?;
-        extract_response_text(response, debug_enabled).map_err(|message| ApiAttemptError {
-            should_fallback: response::should_fallback_from_empty_responses_payload(&message),
-            message,
         })
-    }
 }
 
-async fn generate_message_via_chat_completions(
-    cfg: &Config,
-    client: &Client<OpenAiCompatibleConfig>,
-    prompt: &str,
-    renderer: &mut StreamRenderer,
-    debug_provider: bool,
-) -> Result<String, String> {
-    let debug_enabled = provider_debug_enabled(debug_provider);
+fn build_chat_request(cfg: &Config, prompt: &str) -> Result<CreateChatCompletionRequest, String> {
     let system_message = ChatCompletionRequestSystemMessageArgs::default()
         .content(SYSTEM_PROMPT)
         .build()
@@ -241,37 +276,116 @@ async fn generate_message_via_chat_completions(
         .build()
         .map(ChatCompletionRequestMessage::User)
         .map_err(|err| err.to_string())?;
-    let request = CreateChatCompletionRequestArgs::default()
+
+    CreateChatCompletionRequestArgs::default()
         .model(&cfg.model)
         .messages(vec![system_message, user_message])
         .max_completion_tokens(MAX_OUTPUT_TOKENS as u32)
         .build()
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| err.to_string())
+}
 
+async fn run_responses_stream_once(
+    cfg: &Config,
+    request: CreateResponse,
+    renderer: &mut StreamRenderer,
+    debug_enabled: bool,
+) -> Result<String, ApiAttemptError> {
     if debug_enabled {
         eprintln!(
-            "git-ai-commit: provider debug: POST {} model={} stream={}",
-            request::chat_completions_url(&cfg.api_base),
+            "git-ai-commit: provider debug: POST {} model={} stream=true",
+            request::responses_url(&cfg.api_base),
             cfg.model,
-            renderer.enabled()
         );
     }
 
-    if renderer.enabled() {
-        let stream = client
-            .chat()
-            .create_stream(request)
-            .await
-            .map_err(|err| err.to_string())?;
-        response::collect_chat_completion_stream(stream, renderer).await
-    } else {
-        let response = client
-            .chat()
-            .create(request)
-            .await
-            .map_err(|err| err.to_string())?;
-        extract_chat_message(response, debug_enabled)
+    let client = new_openai_client(cfg).map_err(|message| ApiAttemptError {
+        message,
+        should_fallback: false,
+    })?;
+    let stream = client
+        .responses()
+        .create_stream(request)
+        .await
+        .map_err(openai_error_to_attempt_error)?;
+
+    collect_response_stream(stream, renderer, debug_enabled).await
+}
+
+async fn run_responses_non_stream_once(
+    cfg: &Config,
+    request: CreateResponse,
+    debug_enabled: bool,
+) -> Result<String, ApiAttemptError> {
+    if debug_enabled {
+        eprintln!(
+            "git-ai-commit: provider debug: POST {} model={} stream=false",
+            request::responses_url(&cfg.api_base),
+            cfg.model,
+        );
     }
+
+    let client = new_openai_client(cfg).map_err(|message| ApiAttemptError {
+        message,
+        should_fallback: false,
+    })?;
+    let response = client
+        .responses()
+        .create(request)
+        .await
+        .map_err(openai_error_to_attempt_error)?;
+
+    extract_response_text(response, debug_enabled).map_err(|message| ApiAttemptError {
+        should_fallback: response::should_fallback_from_empty_responses_payload(&message),
+        message,
+    })
+}
+
+async fn run_chat_stream_once(
+    cfg: &Config,
+    request: CreateChatCompletionRequest,
+    renderer: &mut StreamRenderer,
+    debug_enabled: bool,
+) -> Result<String, String> {
+    if debug_enabled {
+        eprintln!(
+            "git-ai-commit: provider debug: POST {} model={} stream=true",
+            request::chat_completions_url(&cfg.api_base),
+            cfg.model,
+        );
+    }
+
+    let client = new_openai_client(cfg)?;
+    let stream: ChatCompletionResponseStream = client
+        .chat()
+        .create_stream(request)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    response::collect_chat_completion_stream(stream, renderer).await
+}
+
+async fn run_chat_non_stream_once(
+    cfg: &Config,
+    request: CreateChatCompletionRequest,
+    debug_enabled: bool,
+) -> Result<String, String> {
+    if debug_enabled {
+        eprintln!(
+            "git-ai-commit: provider debug: POST {} model={} stream=false",
+            request::chat_completions_url(&cfg.api_base),
+            cfg.model,
+        );
+    }
+
+    let client = new_openai_client(cfg)?;
+    let response = client
+        .chat()
+        .create(request)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    extract_chat_message(response, debug_enabled)
 }
 
 async fn collect_response_stream(
@@ -279,14 +393,14 @@ async fn collect_response_stream(
     renderer: &mut StreamRenderer,
     debug_enabled: bool,
 ) -> Result<String, ApiAttemptError> {
-    let mut content = String::new();
+    let mut accumulator = ResponseTextAccumulator::default();
     let mut error_message = None;
 
     while let Some(event) = stream.next().await {
         if let Some(message) = append_response_stream_event_text(
             event.map_err(openai_error_to_attempt_error)?,
             renderer,
-            &mut content,
+            &mut accumulator,
             debug_enabled,
         )
         .map_err(|message| ApiAttemptError {
@@ -297,24 +411,37 @@ async fn collect_response_stream(
         }
     }
 
-    if !content.trim().is_empty() {
-        return Ok(crate::message::sanitize_message(&content));
+    if !accumulator.content().trim().is_empty() {
+        return Ok(crate::message::sanitize_message(accumulator.content()));
     }
 
+    let message = error_message
+        .unwrap_or_else(|| "responses request returned no output text".to_string());
     Err(ApiAttemptError {
-        should_fallback: response::should_fallback_from_empty_responses_payload(
-            error_message
-                .as_deref()
-                .unwrap_or("responses request returned no output text"),
-        ),
-        message: error_message.unwrap_or_else(|| "responses request returned no output text".to_string()),
+        should_fallback: should_fallback_from_responses_message(&message)
+            || response::should_fallback_from_empty_responses_payload(&message),
+        message,
     })
 }
 
 fn openai_error_to_attempt_error(err: async_openai::error::OpenAIError) -> ApiAttemptError {
-    let message = err.to_string();
-    ApiAttemptError {
-        should_fallback: should_fallback_from_responses_message(&message),
-        message,
+    match err {
+        async_openai::error::OpenAIError::ApiError(error) => {
+            let message = error.to_string();
+            ApiAttemptError {
+                should_fallback: response::should_fallback_from_responses(
+                    error.status_code.as_u16(),
+                    &error.api_error.to_string(),
+                ),
+                message,
+            }
+        }
+        other => {
+            let message = other.to_string();
+            ApiAttemptError {
+                should_fallback: should_fallback_from_responses_message(&message),
+                message,
+            }
+        }
     }
 }

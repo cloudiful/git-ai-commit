@@ -62,7 +62,7 @@ fn commit_confirmation_prompt() -> String {
 
 fn commit_confirmation_prompt_with(env: &PromptColorEnv) -> String {
     if !commit_prompt_colors_enabled_with(env) {
-        return "git-ai-commit: commit now, edit before commit, or cancel? [y=e commit/e=edit/N=cancel] ".to_string();
+        return "git-ai-commit: commit now, edit before commit, or cancel? [y=commit/e=edit/N=cancel] ".to_string();
     }
 
     format!(
@@ -91,6 +91,7 @@ mod tests {
             term: Some("xterm-256color".to_string()),
         });
         assert!(prompt.contains("edit before commit"));
+        assert!(prompt.contains("y=commit"));
         assert!(prompt.contains("["));
     }
 

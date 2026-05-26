@@ -1,172 +1,149 @@
 # git-ai-commit
 
-Small Rust CLI for AI-generated Git commit messages.
+AI-generated Git commit messages, wired into normal `git commit` flow.
 
-## Installation
+`git-ai-commit` reads your staged changes, redacts sensitive-looking values before sending anything upstream, asks a model for a Conventional Commit-style message, and then commits with Git. If AI should be skipped or a provider is unusable, it falls back to plain `git commit`.
 
-Download prebuilt binary from [Releases](https://github.com/cloudiful/git-ai-commit/releases).
+## Features
 
-Or install from git:
+- Use it as a real Git subcommand: `git ai-commit`
+- OpenAI-compatible by default
+- Tries `v1/responses` first, then falls back to `v1/chat/completions`
+- Supports Ollama and Anthropic-compatible endpoints
+- Redacts sensitive-looking values from diffs before sending prompts
+- Preserves normal Git behavior for flows like `-m`, `--amend`, and path arguments
+
+## Install
+
+Download a binary from [GitHub Releases](https://github.com/cloudiful/git-ai-commit/releases).
+
+Or install from source:
 
 ```sh
 cargo install --git https://github.com/cloudiful/git-ai-commit.git git-ai-commit
 ```
 
-Then use `git-ai-commit` from your `PATH`.
+After that, Git will discover it automatically as `git ai-commit`.
 
 ## Quick Start
 
-Default provider behavior:
-
-- If `ai.commit.provider` is unset, `git-ai-commit` uses `openai-compatible`.
-
-For the default `openai-compatible` mode, configure:
+Configure a provider. OpenAI-compatible is the default mode:
 
 ```sh
-git config --global ai.commit.apiBase https://your-openai-compatible-endpoint/v1
-git config --global ai.commit.apiKey your-token
-git config --global ai.commit.model your-model
+git config --global ai.commit.apiBase https://api.openai.com/v1
+git config --global ai.commit.apiKey YOUR_API_KEY
+git config --global ai.commit.model gpt-4.1-mini
 ```
 
-Then use `git ai-commit` instead of `git commit`:
+Then commit from staged changes:
 
 ```sh
 git add .
 git ai-commit
 ```
 
-Signed commits still work:
+Useful variants:
 
 ```sh
 git ai-commit -s
+git ai-commit --no-confirm
+git-ai-commit generate
+git-ai-commit doctor
 ```
 
 ## Providers
 
 ### OpenAI-Compatible
 
-This is the default when `ai.commit.provider` is not set.
+This is the default.
 
 ```sh
 git config --global ai.commit.provider openai-compatible
-git config --global ai.commit.apiBase https://your-openai-compatible-endpoint/v1
-git config --global ai.commit.apiKey your-token
-git config --global ai.commit.model your-model
+git config --global ai.commit.apiBase https://api.openai.com/v1
+git config --global ai.commit.apiKey YOUR_API_KEY
+git config --global ai.commit.model gpt-4.1-mini
 ```
 
-Use for OpenAI or any compatible endpoint.
-
-`ai.commit.apiBase` accepts either:
-
-- an API prefix like `https://api.openai.com/v1` or `https://host/openai/v1`
-- an exact endpoint like `https://api.openai.com/v1/responses` or `https://host/v1/chat/completions`
-
-`git-ai-commit` normalizes that value and derives sibling endpoints such as `/responses`, `/chat/completions`, and `/models`.
+`ai.commit.apiBase` can be either a base like `https://api.openai.com/v1` or a full endpoint like `.../v1/responses` or `.../v1/chat/completions`. The tool normalizes it and derives sibling endpoints automatically.
 
 ### Ollama
 
-Local Ollama uses the OpenAI-compatible API and does not require an API key.
+Local Ollama:
 
 ```sh
 git config --global ai.commit.provider ollama
+git config --global ai.commit.apiBase http://localhost:11434
 git config --global ai.commit.model llama3.2
 ```
 
-Default `ai.commit.apiBase` for `ollama`:
+Local Ollama does not require an API key.
+
+### Anthropic-Compatible
 
 ```sh
-git config --global ai.commit.apiBase http://localhost:11434
+git config --global ai.commit.provider anthropic-compatible
+git config --global ai.commit.apiBase https://api.deepseek.com/anthropic
+git config --global ai.commit.apiKey YOUR_API_KEY
+git config --global ai.commit.model deepseek-chat
 ```
-
-For Ollama cloud:
-
-```sh
-git config --global ai.commit.provider ollama
-git config --global ai.commit.apiBase https://ollama.com/v1
-git config --global ai.commit.apiKey your-ollama-token
-git config --global ai.commit.model gpt-oss:20b
-```
-
-## How It Works
-
-`git ai-commit` reads staged changes, asks configured model to draft commit
-message, asks for `y/e/N` confirmation in interactive use, then runs normal Git
-commit flow with generated message.
-
-For OpenAI-compatible providers, it now tries `v1/responses` first. If that endpoint is clearly unsupported, it falls back to `v1/chat/completions`.
 
 ## Common Options
 
-```sh
-git ai-commit --no-confirm
-git ai-commit --debug-provider
-git ai-commit --show-redactions
-git-ai-commit generate
-git-ai-commit doctor
-```
+- `--no-confirm`: commit immediately without the interactive confirm step
+- `--show-redactions`: print the redaction preview before sending the prompt
+- `--debug-provider`: print provider endpoints and full response payloads to stderr
 
-- `--no-confirm`: skip the interactive `y/e/N` confirmation prompt and commit immediately.
-- `--debug-provider`: print provider endpoint, HTTP status, and response body summary to stderr when the upstream request fails.
-- `--show-redactions`: print detailed redaction entries; by default only the redaction summary count is shown.
-- Interactive confirm prompt: use `y` to commit now, `e` to open the generated message in your editor before committing, or `n`/Enter to cancel.
+## Config
 
-## Redaction
+Most users only need these keys:
 
-Staged diffs are redacted before model requests by default. Turn all redaction off with:
+- `ai.commit.provider`
+- `ai.commit.apiBase`
+- `ai.commit.apiKey`
+- `ai.commit.model`
+- `ai.commit.confirmCommit`
+- `ai.commit.openEditor`
+- `ai.commit.redactSecrets`
+- `ai.commit.maxDiffTokens`
+- `ai.commit.modelContextTokens`
 
-```sh
-git config --global ai.commit.redactSecrets false
-```
-
-Individual finding kinds can be enabled or disabled:
-
-```sh
-git config --global ai.commit.redaction.domain true
-git config --global ai.commit.redaction.person false
-```
-
-Config file form:
-
-```json
-{
-  "redaction_rules": {
-    "domain": true,
-    "person": false
-  }
-}
-```
-
-Supported rule keys: `secret`, `domain`, `url`, `email`, `ip`, `cidr`, `phone`, `person`, `organization`.
-
-## Model Context Tokens
-
-`ai.commit.modelContextTokens` lets diff sampling clamp itself against the model's total context window.
-
-```sh
-git config --global ai.commit.modelContextTokens 32768
-```
-
-When this value is unset and `ai.commit.apiBase` points to OpenRouter, `git-ai-commit` automatically looks up the configured model in OpenRouter's `/v1/models` catalog and uses the returned `top_provider.context_length` or `context_length`.
-
-- Explicit `ai.commit.modelContextTokens` always wins over auto-detection.
-- The lookup is done at runtime when generating the prompt, not while reading config.
-- Metadata is cached in memory for the current process only.
-
-## Doctor
-
-```sh
-git-ai-commit doctor
-```
-
-`doctor` prints the resolved provider, base URL, model, and auth mode.
-
-- In `ollama` mode it probes `/v1/models`.
-- It also checks whether configured model is visible.
-
-## Environment Overrides
+Environment variables can override config, including:
 
 - `GIT_AI_COMMIT_PROVIDER`
 - `GIT_AI_COMMIT_API_BASE`
 - `GIT_AI_COMMIT_API_KEY`
 - `GIT_AI_COMMIT_MODEL`
-- `GIT_AI_COMMIT_DEBUG_PROVIDER`
+
+## Behavior Notes
+
+- AI commit messages are generated from staged changes only
+- Messages are requested in English Conventional Commit style
+- `responses` is attempted first for OpenAI-compatible providers
+- If `responses` is unsupported or returns no usable text, the tool falls back to `chat/completions`
+- Some commit forms intentionally bypass AI and go straight to Git, such as `-m`, `--amend`, `--fixup`, `-a`, and path arguments
+
+## Large Diffs
+
+Large staged diffs are sampled instead of being sent in full.
+
+- Default diff token budget: `16000`
+- Auto cap for diff token budget: `64000`
+- Commit message output budget: `4096`
+
+If `ai.commit.modelContextTokens` is unset and the provider is OpenRouter, the tool can auto-detect model context from `/v1/models` and adjust the diff budget automatically.
+
+## Troubleshooting
+
+Check config and provider visibility:
+
+```sh
+git-ai-commit doctor
+```
+
+See provider requests and full payloads:
+
+```sh
+git ai-commit --debug-provider
+```
+
+If a provider completes `responses` with output tokens but no visible text, `git-ai-commit` treats that as unusable and falls back when possible.

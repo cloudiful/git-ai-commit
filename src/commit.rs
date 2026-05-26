@@ -1,4 +1,3 @@
-mod alias;
 mod args;
 mod confirm;
 mod doctor;
@@ -50,7 +49,7 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
 
     eprintln!("git-ai-commit: generating commit message from staged changes...");
     let stream_output = if is_interactive_session() {
-        StreamOutput::Stderr
+        StreamOutput::Stdout
     } else {
         StreamOutput::None
     };
@@ -63,7 +62,11 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
     .await
     {
         Ok(value) => value,
-        Err(err) => return run_plain_commit_with_notice(&parsed_args.forward_args, &err),
+        Err(err) => {
+            return Err(format!(
+                "git-ai-commit: failed to generate commit message: {err}"
+            ));
+        }
     };
 
     let mut message_file = write_commit_message_temp_file(&message)?;
@@ -91,10 +94,6 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
         .flush()
         .map_err(|err| err.to_string())?;
     run_git_interactive(None::<&Path>, &commit_args)
-}
-
-pub fn run_init_alias(args: &[String]) -> Result<(), String> {
-    alias::run_init_alias(args)
 }
 
 pub async fn run_doctor(args: &[String]) -> Result<(), String> {

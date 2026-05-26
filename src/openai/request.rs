@@ -96,6 +96,24 @@ pub(crate) fn models_url(base: &str) -> String {
     api_endpoint_url(base, "models")
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ApiEndpointPreference {
+    Auto,
+    ResponsesOnly,
+    ChatCompletionsOnly,
+}
+
+pub(crate) fn endpoint_preference(base: &str) -> ApiEndpointPreference {
+    let url = Url::parse(base.trim()).unwrap_or_else(|_| {
+        panic!("invalid ai.commit.apiBase URL {:?}", base);
+    });
+    match normalized_base_segments(&url).explicit_endpoint {
+        ExplicitEndpoint::Responses => ApiEndpointPreference::ResponsesOnly,
+        ExplicitEndpoint::ChatCompletions => ApiEndpointPreference::ChatCompletionsOnly,
+        ExplicitEndpoint::Models | ExplicitEndpoint::None => ApiEndpointPreference::Auto,
+    }
+}
+
 pub(crate) fn api_endpoint_url(base: &str, endpoint: &str) -> String {
     let mut url = Url::parse(base.trim()).unwrap_or_else(|_| {
         panic!("invalid ai.commit.apiBase URL {:?}", base);
@@ -114,6 +132,15 @@ pub(crate) fn api_endpoint_url(base: &str, endpoint: &str) -> String {
 struct NormalizedBaseSegments<'a> {
     segments: Vec<&'a str>,
     had_known_endpoint: bool,
+    explicit_endpoint: ExplicitEndpoint,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExplicitEndpoint {
+    None,
+    Responses,
+    ChatCompletions,
+    Models,
 }
 
 fn normalized_base_segments(url: &Url) -> NormalizedBaseSegments<'_> {
@@ -126,27 +153,36 @@ fn normalized_base_segments(url: &Url) -> NormalizedBaseSegments<'_> {
         })
         .unwrap_or_default();
 
-    let had_known_endpoint = match segments.as_slice() {
+    let explicit_endpoint = match segments.as_slice() {
         [.., "chat", "completions"] => {
             segments.truncate(segments.len() - 2);
-            true
+            ExplicitEndpoint::ChatCompletions
         }
-        [.., "responses"] | [.., "models"] => {
+        [.., "responses"] => {
             segments.truncate(segments.len() - 1);
-            true
+            ExplicitEndpoint::Responses
         }
-        _ => false,
+        [.., "models"] => {
+            segments.truncate(segments.len() - 1);
+            ExplicitEndpoint::Models
+        }
+        _ => ExplicitEndpoint::None,
     };
+    let had_known_endpoint = !matches!(explicit_endpoint, ExplicitEndpoint::None);
 
     NormalizedBaseSegments {
         segments,
         had_known_endpoint,
+        explicit_endpoint,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{api_endpoint_url, build_prompt, build_prompt_scaffold, models_url};
+    use super::{
+        ApiEndpointPreference, api_endpoint_url, build_prompt, build_prompt_scaffold,
+        endpoint_preference, models_url,
+    };
     use crate::git::RepoContext;
 
     #[test]
@@ -194,5 +230,25 @@ mod tests {
 
         assert!(prompt.contains("Diff coverage: selective sample within token budget"));
         assert!(prompt.contains("Diff stat coverage: truncated"));
+    }
+
+    #[test]
+    fn detects_explicit_endpoint_preferences() {
+        assert_eq!(
+            endpoint_preference("https://api.openai.com/v1/chat/completions"),
+            ApiEndpointPreference::ChatCompletionsOnly
+        );
+        assert_eq!(
+            endpoint_preference("https://api.openai.com/v1/responses"),
+            ApiEndpointPreference::ResponsesOnly
+        );
+        assert_eq!(
+            endpoint_preference("https://api.openai.com/v1"),
+            ApiEndpointPreference::Auto
+        );
+        assert_eq!(
+            endpoint_preference("https://example.com/openai/v1/models"),
+            ApiEndpointPreference::Auto
+        );
     }
 }

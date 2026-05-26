@@ -38,11 +38,6 @@ impl StreamRenderer {
                     let mut stdout = std::io::stdout().lock();
                     stdout.flush()?;
                 }
-                StreamOutput::Stderr => {
-                    let mut stderr = std::io::stderr().lock();
-                    writeln!(stderr)?;
-                    stderr.flush()?;
-                }
                 StreamOutput::None => {}
             }
             self.started = true;
@@ -53,11 +48,6 @@ impl StreamRenderer {
                 let mut stdout = std::io::stdout().lock();
                 self.write_styled(&mut stdout, text)?;
                 stdout.flush()
-            }
-            StreamOutput::Stderr => {
-                let mut stderr = std::io::stderr().lock();
-                self.write_styled(&mut stderr, text)?;
-                stderr.flush()
             }
             StreamOutput::None => Ok(()),
         }
@@ -76,14 +66,6 @@ impl StreamRenderer {
                 }
                 writeln!(stdout)?;
                 stdout.flush()?;
-            }
-            StreamOutput::Stderr => {
-                let mut stderr = std::io::stderr().lock();
-                if self.colors_enabled {
-                    write!(stderr, "{ANSI_RESET}")?;
-                }
-                writeln!(stderr)?;
-                stderr.flush()?;
             }
             StreamOutput::None => {}
         }
