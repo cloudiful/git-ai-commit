@@ -8,6 +8,10 @@ use crate::openai::{
     StreamOutput, generate_message_with_stream_output, resolve_model_context_config,
 };
 use crate::prompt::{is_interactive_session, load_config_for_interactive_use};
+use crate::terminal_ui::{
+    TerminalUiEnv, current_stderr_ui_env, stderr_colors_enabled_with, style_accent, style_label,
+    style_muted, style_subject,
+};
 use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
@@ -47,7 +51,12 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
         eprint!("{}", repo_ctx.secret_redaction_preview);
     }
 
-    eprintln!("git-ai-commit: generating commit message from staged changes...");
+    let colors_enabled = stderr_colors_enabled_with(&current_stderr_ui_env());
+    eprintln!(
+        "{}: {}",
+        style_label(colors_enabled, "git-ai-commit"),
+        style_muted(colors_enabled, "generating commit message from staged changes..."),
+    );
     let stream_output = if is_interactive_session() {
         StreamOutput::Stdout
     } else {
@@ -71,6 +80,9 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
 
     let mut message_file = write_commit_message_temp_file(&message)?;
     log_timing(&cfg, "commit", started, metrics);
+    if !metrics.streamed_render_completed {
+        eprint!("{}", commit_message_preview(&message));
+    }
 
     let mut open_editor = cfg.open_editor;
     if is_interactive_session() && parsed_args.confirm_override.unwrap_or(cfg.confirm_commit) {
@@ -115,4 +127,81 @@ fn write_commit_message_temp_file(message: &str) -> Result<NamedTempFile, String
     let mut file = NamedTempFile::new().map_err(|err| err.to_string())?;
     writeln!(file, "{message}").map_err(|err| err.to_string())?;
     Ok(file)
+}
+
+fn commit_message_preview(message: &str) -> String {
+    commit_message_preview_with(&current_stderr_ui_env(), message)
+}
+
+fn commit_message_preview_with(env: &TerminalUiEnv, message: &str) -> String {
+    let lines = message.lines().collect::<Vec<_>>();
+    let subject = lines.first().copied().unwrap_or_default();
+    let body = lines.iter().skip(1).copied().collect::<Vec<_>>();
+    let colors_enabled = stderr_colors_enabled_with(env);
+
+    let mut out = String::new();
+    out.push('\n');
+    out.push_str(&format!(
+        "{}: {}\n",
+        style_label(colors_enabled, "git-ai-commit"),
+        if colors_enabled {
+            style_muted(colors_enabled, "generated commit message")
+        } else {
+            "generated commit message".to_string()
+        }
+    ));
+    out.push_str(&format!(
+        "  {} {}\n",
+        style_accent(colors_enabled, ">"),
+        style_subject(colors_enabled, subject)
+    ));
+    for line in body {
+        let content = if line.is_empty() { " " } else { line };
+        out.push_str(&format!(
+            "  {} {}\n",
+            style_accent(colors_enabled, "|"),
+            style_muted(colors_enabled, content)
+        ));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::commit_message_preview_with;
+    use crate::terminal_ui::{TerminalUiEnv, style_accent, style_label, style_subject};
+
+    #[test]
+    fn plain_preview_formats_subject_and_body() {
+        let preview = commit_message_preview_with(
+            &TerminalUiEnv {
+                stderr_is_terminal: false,
+                no_color: false,
+                term: Some("xterm-256color".to_string()),
+            },
+            "feat: add preview\n\nExplain body",
+        );
+
+        assert!(preview.contains("generated commit message"));
+        assert!(preview.contains("  > feat: add preview"));
+        assert!(preview.contains("  |  "));
+        assert!(preview.contains("  | Explain body"));
+    }
+
+    #[test]
+    fn colored_preview_uses_expected_styles() {
+        let env = TerminalUiEnv {
+            stderr_is_terminal: true,
+            no_color: false,
+            term: Some("xterm-256color".to_string()),
+        };
+        let preview = commit_message_preview_with(
+            &env,
+            "fix: tighten prompt",
+        );
+
+        assert!(preview.contains(&style_label(true, "git-ai-commit")));
+        assert!(preview.contains(&style_accent(true, ">")));
+        assert!(preview.contains(&style_subject(true, "fix: tighten prompt")));
+    }
 }

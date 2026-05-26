@@ -111,6 +111,7 @@ pub(crate) async fn generate_anthropic_message_with_stream_output(
         message,
         GenerationMetrics {
             api_duration: started.elapsed(),
+            streamed_render_completed: renderer.completed_render(),
         },
     ))
 }

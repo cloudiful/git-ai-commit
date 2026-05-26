@@ -11,6 +11,7 @@ mod openai;
 mod prompt;
 mod provider_common;
 mod redaction;
+mod terminal_ui;
 mod text_budget;
 mod tokenizer;
 

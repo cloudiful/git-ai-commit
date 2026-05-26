@@ -34,6 +34,7 @@ use response::{
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GenerationMetrics {
     pub api_duration: Duration,
+    pub streamed_render_completed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -161,6 +162,7 @@ pub(crate) async fn generate_openai_message_with_stream_output(
     renderer.finish().map_err(|err| err.to_string())?;
     let metrics = GenerationMetrics {
         api_duration: started.elapsed(),
+        streamed_render_completed: renderer.completed_render(),
     };
     validate_message(&message)?;
     Ok((message, metrics))

@@ -9,6 +9,7 @@ const ANSI_BODY: &str = "\x1b[2m";
 pub(crate) struct StreamRenderer {
     output: StreamOutput,
     started: bool,
+    completed: bool,
     colors_enabled: bool,
     in_subject_line: bool,
 }
@@ -18,6 +19,7 @@ impl StreamRenderer {
         Self {
             output,
             started: false,
+            completed: false,
             colors_enabled: stream_colors_enabled(output),
             in_subject_line: true,
         }
@@ -70,13 +72,19 @@ impl StreamRenderer {
             StreamOutput::None => {}
         }
         self.started = false;
+        self.completed = true;
         self.in_subject_line = true;
         Ok(())
     }
 
     pub(crate) fn reset(&mut self) {
         self.started = false;
+        self.completed = false;
         self.in_subject_line = true;
+    }
+
+    pub(crate) fn completed_render(&self) -> bool {
+        self.completed
     }
 
     fn write_styled<W: Write>(&mut self, writer: &mut W, text: &str) -> std::io::Result<()> {

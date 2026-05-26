@@ -1,23 +1,14 @@
-use std::env;
-use std::io::{self, IsTerminal, Write};
-
-const ANSI_RESET: &str = "\x1b[0m";
-const ANSI_PROMPT_LABEL: &str = "\x1b[1;33m";
-const ANSI_PROMPT_YES: &str = "\x1b[1;32m";
-const ANSI_PROMPT_NO: &str = "\x1b[2m";
+use crate::terminal_ui::{
+    TerminalUiEnv, current_stderr_ui_env, stderr_colors_enabled_with, style_edit, style_label,
+    style_muted, style_success,
+};
+use std::io::{self, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommitConfirmation {
     Proceed,
     Edit,
     Cancel,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PromptColorEnv {
-    stderr_is_terminal: bool,
-    no_color: bool,
-    term: Option<String>,
 }
 
 pub(super) fn prompt_for_commit_confirmation() -> Result<CommitConfirmation, String> {
@@ -48,81 +39,75 @@ fn parse_commit_confirmation(input: &str) -> Option<CommitConfirmation> {
     }
 }
 
-fn current_prompt_color_env() -> PromptColorEnv {
-    PromptColorEnv {
-        stderr_is_terminal: io::stderr().is_terminal(),
-        no_color: env::var_os("NO_COLOR").is_some(),
-        term: env::var("TERM").ok(),
-    }
-}
-
 fn commit_confirmation_prompt() -> String {
-    commit_confirmation_prompt_with(&current_prompt_color_env())
+    commit_confirmation_prompt_with(&current_stderr_ui_env())
 }
 
-fn commit_confirmation_prompt_with(env: &PromptColorEnv) -> String {
-    if !commit_prompt_colors_enabled_with(env) {
-        return "git-ai-commit: commit now, edit before commit, or cancel? [y=commit/e=edit/N=cancel] ".to_string();
+fn commit_confirmation_prompt_with(env: &TerminalUiEnv) -> String {
+    let colors_enabled = stderr_colors_enabled_with(env);
+    if !colors_enabled {
+        return "git-ai-commit: continue? [y=commit/e=edit/N=cancel] ".to_string();
     }
 
     format!(
-        "git-ai-commit: {ANSI_PROMPT_LABEL}commit now, edit before commit, or cancel?{ANSI_RESET} [{ANSI_PROMPT_YES}y=commit{ANSI_RESET}/e=edit/{ANSI_PROMPT_NO}N=cancel{ANSI_RESET}] "
+        "{}: {} [{}/{}/{}] ",
+        style_label(colors_enabled, "git-ai-commit"),
+        style_muted(colors_enabled, "continue?"),
+        style_success(colors_enabled, "y=commit"),
+        style_edit(colors_enabled, "e=edit"),
+        style_muted(colors_enabled, "N=cancel"),
     )
-}
-
-fn commit_prompt_colors_enabled_with(env: &PromptColorEnv) -> bool {
-    env.stderr_is_terminal
-        && !env.no_color
-        && !matches!(env.term.as_deref(), Some(term) if term.eq_ignore_ascii_case("dumb"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ANSI_PROMPT_LABEL, ANSI_PROMPT_NO, ANSI_PROMPT_YES, CommitConfirmation, PromptColorEnv,
-        commit_confirmation_prompt_with, parse_commit_confirmation,
+    use super::{CommitConfirmation, commit_confirmation_prompt_with, parse_commit_confirmation};
+    use crate::terminal_ui::{
+        TerminalUiEnv, style_edit, style_label, style_muted, style_success,
     };
 
     #[test]
     fn plain_confirmation_prompt_still_contains_question() {
-        let prompt = commit_confirmation_prompt_with(&PromptColorEnv {
+        let prompt = commit_confirmation_prompt_with(&TerminalUiEnv {
             stderr_is_terminal: false,
             no_color: false,
             term: Some("xterm-256color".to_string()),
         });
-        assert!(prompt.contains("edit before commit"));
+        assert!(prompt.contains("continue?"));
         assert!(prompt.contains("y=commit"));
         assert!(prompt.contains("["));
     }
 
     #[test]
     fn colored_confirmation_prompt_uses_expected_styles_when_enabled() {
-        let prompt = commit_confirmation_prompt_with(&PromptColorEnv {
+        let env = TerminalUiEnv {
             stderr_is_terminal: true,
             no_color: false,
             term: Some("xterm-256color".to_string()),
-        });
-        assert!(prompt.contains(ANSI_PROMPT_LABEL));
-        assert!(prompt.contains(ANSI_PROMPT_YES));
-        assert!(prompt.contains(ANSI_PROMPT_NO));
+        };
+        let prompt = commit_confirmation_prompt_with(&env);
+        assert!(prompt.contains(&style_label(true, "git-ai-commit")));
+        assert!(prompt.contains(&style_success(true, "y=commit")));
+        assert!(prompt.contains(&style_edit(true, "e=edit")));
+        assert!(prompt.contains(&style_muted(true, "N=cancel")));
     }
 
     #[test]
     fn prompt_colors_disabled_for_no_color_or_dumb_term() {
         for env in [
-            PromptColorEnv {
+            TerminalUiEnv {
                 stderr_is_terminal: true,
                 no_color: true,
                 term: Some("xterm-256color".to_string()),
             },
-            PromptColorEnv {
+            TerminalUiEnv {
                 stderr_is_terminal: true,
                 no_color: false,
                 term: Some("dumb".to_string()),
             },
         ] {
             let prompt = commit_confirmation_prompt_with(&env);
-            assert!(!prompt.contains(ANSI_PROMPT_LABEL));
+            assert!(!prompt.contains("\x1b["));
         }
     }
 

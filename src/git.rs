@@ -2,6 +2,10 @@ use crate::config::Config;
 use crate::diff_parse::parse_diff_files;
 use crate::diff_sampling::{DiffBudget, prepare_diff_for_prompt, resolve_diff_budget};
 use crate::redaction::{RedactionEntry, RedactionResult, redact_diff_for_prompt};
+use crate::terminal_ui::{
+    current_stderr_ui_env, stderr_colors_enabled, stderr_colors_enabled_with, style_accent,
+    style_label, style_muted, style_subject,
+};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -70,15 +74,30 @@ pub fn collect_repo_context(cfg: &Config) -> Result<RepoContext, String> {
         log_sampling_notice(budget, sampling.represented_files, sampling.total_files);
     }
     if redacted_diff.replacement_occurrences > 0 {
+        let colors_enabled = stderr_colors_enabled();
         if redacted_diff.unique_values > 0 {
             eprintln!(
-                "git-ai-commit: redacted {} unique sensitive-looking value(s) across {} occurrence(s) before sending the diff to the model",
-                redacted_diff.unique_values, redacted_diff.replacement_occurrences
+                "{}: {}",
+                style_label(colors_enabled, "git-ai-commit"),
+                style_muted(
+                    colors_enabled,
+                    &format!(
+                        "redacted {} unique sensitive-looking value(s) across {} occurrence(s) before sending the diff",
+                        redacted_diff.unique_values, redacted_diff.replacement_occurrences
+                    ),
+                ),
             );
         } else {
             eprintln!(
-                "git-ai-commit: redacted {} sensitive-looking occurrence(s) before sending the diff to the model",
-                redacted_diff.replacement_occurrences
+                "{}: {}",
+                style_label(colors_enabled, "git-ai-commit"),
+                style_muted(
+                    colors_enabled,
+                    &format!(
+                        "redacted {} sensitive-looking occurrence(s) before sending the diff",
+                        redacted_diff.replacement_occurrences
+                    ),
+                ),
             );
         }
     }
@@ -103,35 +122,53 @@ fn format_redaction_preview(entries: &[RedactionEntry]) -> String {
         return String::new();
     }
 
-    let mut preview =
-        String::from("git-ai-commit: redaction preview before sending the diff to the model:\n");
+    let env = current_stderr_ui_env();
+    let colors_enabled = stderr_colors_enabled_with(&env);
+    let mut preview = format!(
+        "{}: {}\n",
+        style_label(colors_enabled, "git-ai-commit"),
+        style_muted(colors_enabled, "redaction preview")
+    );
 
     for entry in entries.iter().take(REDACTION_PREVIEW_LIMIT) {
-        preview.push_str("  - ");
-        preview.push_str(&entry.kind);
+        preview.push_str("  ");
+        preview.push_str(&style_accent(colors_enabled, "-"));
         preview.push(' ');
-        preview.push_str(&entry.replacement);
+        preview.push_str(&style_muted(colors_enabled, &entry.kind));
+        preview.push(' ');
+        preview.push_str(&style_subject(colors_enabled, &entry.replacement));
         if entry.occurrences > 1 {
-            preview.push_str(&format!(" x{}", entry.occurrences));
+            preview.push_str(&format!(
+                " {}",
+                style_muted(colors_enabled, &format!("x{}", entry.occurrences))
+            ));
         }
-        preview.push_str(" <= ");
-        preview.push_str(&preview_value(&entry.original));
+        preview.push_str(" ");
+        preview.push_str(&style_accent(colors_enabled, "<="));
+        preview.push(' ');
+        preview.push_str(&style_muted(colors_enabled, &preview_value(&entry.original)));
         if let Some(display_value) = entry
             .display_value
             .as_ref()
             .filter(|value| *value != &entry.original)
         {
-            preview.push_str(" (hint ");
-            preview.push_str(display_value);
-            preview.push(')');
+            preview.push(' ');
+            preview.push_str(&style_muted(
+                colors_enabled,
+                &format!("(hint {display_value})"),
+            ));
         }
         preview.push('\n');
     }
 
     if entries.len() > REDACTION_PREVIEW_LIMIT {
         preview.push_str(&format!(
-            "git-ai-commit: ... and {} more redacted value(s)\n",
-            entries.len() - REDACTION_PREVIEW_LIMIT
+            "{}: {}\n",
+            style_label(colors_enabled, "git-ai-commit"),
+            style_muted(
+                colors_enabled,
+                &format!("... and {} more redacted value(s)", entries.len() - REDACTION_PREVIEW_LIMIT),
+            ),
         ));
     }
 
@@ -153,25 +190,31 @@ fn preview_value(value: &str) -> String {
 }
 
 fn log_sampling_notice(budget: DiffBudget, represented_files: usize, total_files: usize) {
-    match budget {
-        DiffBudget::Bytes { max_bytes } => eprintln!(
-            "git-ai-commit: staged diff selectively sampled within {} byte budget ({}/{}) files represented",
+    let colors_enabled = stderr_colors_enabled();
+    let message = match budget {
+        DiffBudget::Bytes { max_bytes } => format!(
+            "diff sampled within {} byte budget ({}/{}) files represented",
             max_bytes, represented_files, total_files
         ),
         DiffBudget::Tokens {
             configured_tokens,
             effective_tokens,
-        } if configured_tokens != effective_tokens => eprintln!(
-            "git-ai-commit: staged diff selectively sampled within configured {} tokens, effective {} tokens after context clamp ({}/{}) files represented",
+        } if configured_tokens != effective_tokens => format!(
+            "diff sampled within configured {} tokens, effective {} after context clamp ({}/{}) files represented",
             configured_tokens, effective_tokens, represented_files, total_files
         ),
         DiffBudget::Tokens {
             configured_tokens, ..
-        } => eprintln!(
-            "git-ai-commit: staged diff selectively sampled within configured {} tokens ({}/{}) files represented",
+        } => format!(
+            "diff sampled within configured {} tokens ({}/{}) files represented",
             configured_tokens, represented_files, total_files
         ),
-    }
+    };
+    eprintln!(
+        "{}: {}",
+        style_label(colors_enabled, "git-ai-commit"),
+        style_muted(colors_enabled, &message),
+    );
 }
 
 pub fn current_branch(repo_root: &Path) -> Result<String, String> {
@@ -268,7 +311,7 @@ mod tests {
             },
         ]);
 
-        assert!(preview.contains("redaction preview before sending the diff"));
+        assert!(preview.contains("redaction preview"));
         assert!(preview.contains("secret __R_SECRET_001__ x2 <="));
         assert!(preview.contains("sk_live_1234567890ABCDEF"));
         assert!(preview.contains("(hint <secret>)"));
