@@ -1,63 +1,4 @@
-use super::{
-    collect_streaming_chat_completion, collect_streaming_responses_api_response,
-    parse_json_chat_completion, parse_responses_api_response, should_fallback_from_responses,
-};
-use crate::openai::StreamOutput;
-use crate::openai::stream::StreamRenderer;
-use std::io::Cursor;
-
-#[test]
-fn parses_json_response() {
-    let body = r#"{"choices":[{"message":{"content":"feat: add parser"}}]}"#;
-    let message = parse_json_chat_completion(200, body).unwrap();
-    assert_eq!(message, "feat: add parser");
-}
-
-#[test]
-fn parses_responses_output_text() {
-    let body = r#"{"output_text":"feat: add parser"}"#;
-    let message = parse_responses_api_response(200, body).unwrap();
-    assert_eq!(message, "feat: add parser");
-}
-
-#[test]
-fn parses_responses_output_content() {
-    let body = r#"{"output":[{"content":[{"text":"feat: add parser"}]}]}"#;
-    let message = parse_responses_api_response(200, body).unwrap();
-    assert_eq!(message, "feat: add parser");
-}
-
-#[test]
-fn streaming_chat_completion_handles_role_and_empty_delta_chunks() {
-    let body = concat!(
-        "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
-        "data: {\"choices\":[{\"delta\":{\"content\":\"feat:\"}}]}\n\n",
-        "data: {\"choices\":[{\"delta\":{}}]}\n\n",
-        "data: {\"choices\":[{\"delta\":{\"content\":\" add parser\"}}]}\n\n",
-        "data: [DONE]\n"
-    );
-    let mut renderer = StreamRenderer::new(StreamOutput::None);
-
-    let message = collect_streaming_chat_completion(200, Cursor::new(body), &mut renderer).unwrap();
-
-    assert_eq!(message, "feat: add parser");
-}
-
-#[test]
-fn streaming_responses_supports_openrouter_content_part_events() {
-    let body = concat!(
-        "data: {\"type\":\"response.content_part.delta\",\"part\":{\"text\":\"feat:\"}}\n\n",
-        "data: {\"type\":\"response.content_part.delta\",\"part\":{\"text\":\" add parser\"}}\n\n",
-        "data: {\"type\":\"response.output_item.done\",\"item\":{\"content\":[{\"text\":\"feat: add parser\"}]}}\n\n",
-        "data: [DONE]\n"
-    );
-    let mut renderer = StreamRenderer::new(StreamOutput::None);
-
-    let message =
-        collect_streaming_responses_api_response(200, Cursor::new(body), &mut renderer).unwrap();
-
-    assert_eq!(message, "feat: add parser");
-}
+use super::{should_fallback_from_responses, should_fallback_from_responses_message};
 
 #[test]
 fn falls_back_when_responses_endpoint_is_unsupported() {
@@ -69,5 +10,16 @@ fn falls_back_when_responses_endpoint_is_unsupported() {
         400,
         "unsupported endpoint: /v1/responses is not supported",
     ));
-    assert!(!should_fallback_from_responses(401, "invalid api key",));
+    assert!(!should_fallback_from_responses(401, "invalid api key"));
+}
+
+#[test]
+fn infers_fallback_from_sdk_error_message_when_status_missing() {
+    assert!(should_fallback_from_responses_message(
+        "unsupported endpoint: /v1/responses is not supported"
+    ));
+    assert!(should_fallback_from_responses_message(
+        "responses request failed with status 404: unknown path /v1/responses"
+    ));
+    assert!(!should_fallback_from_responses_message("invalid api key"));
 }

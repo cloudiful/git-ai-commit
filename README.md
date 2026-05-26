@@ -23,7 +23,7 @@ Default provider behavior:
 For the default `openai-compatible` mode, configure:
 
 ```sh
-git config --global ai.commit.apiBase https://your-openai-compatible-endpoint
+git config --global ai.commit.apiBase https://your-openai-compatible-endpoint/v1
 git config --global ai.commit.apiKey your-token
 git config --global ai.commit.model your-model
 ```
@@ -49,12 +49,19 @@ This is the default when `ai.commit.provider` is not set.
 
 ```sh
 git config --global ai.commit.provider openai-compatible
-git config --global ai.commit.apiBase https://your-openai-compatible-endpoint
+git config --global ai.commit.apiBase https://your-openai-compatible-endpoint/v1
 git config --global ai.commit.apiKey your-token
 git config --global ai.commit.model your-model
 ```
 
 Use for OpenAI or any compatible endpoint.
+
+`ai.commit.apiBase` accepts either:
+
+- an API prefix like `https://api.openai.com/v1` or `https://host/openai/v1`
+- an exact endpoint like `https://api.openai.com/v1/responses` or `https://host/v1/chat/completions`
+
+`git-ai-commit` normalizes that value and derives sibling endpoints such as `/responses`, `/chat/completions`, and `/models`.
 
 ### Ollama
 
@@ -85,6 +92,8 @@ git config --global ai.commit.model gpt-oss:20b
 `git ai-commit` reads staged changes, asks configured model to draft commit
 message, asks for `y/e/N` confirmation in interactive use, then runs normal Git
 commit flow with generated message.
+
+For OpenAI-compatible providers, it now tries `v1/responses` first. If that endpoint is clearly unsupported, it falls back to `v1/chat/completions`.
 
 ## Common Options
 

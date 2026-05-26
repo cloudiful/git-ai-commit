@@ -38,27 +38,6 @@ pub fn validate_message(message: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn format_commit_message(subject: &str, body: &[String]) -> Result<String, String> {
-    let subject = sanitize_message(subject);
-    if subject.trim().is_empty() {
-        return Err("structured commit message subject is empty".to_string());
-    }
-
-    let body_lines = body
-        .iter()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    let mut message = subject;
-    if !body_lines.is_empty() {
-        message.push_str("\n\n");
-        message.push_str(&body_lines.join("\n"));
-    }
-    Ok(message)
-}
-
 pub fn trim_to_utf8_bytes(input: &str, max_bytes: usize) -> String {
     if max_bytes == 0 {
         return String::new();

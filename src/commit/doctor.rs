@@ -22,7 +22,7 @@ struct DoctorProviderError {
     message: String,
 }
 
-pub(super) fn run_doctor(args: &[String]) -> Result<(), String> {
+pub(super) async fn run_doctor(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
         return Err("doctor does not accept arguments".to_string());
     }
@@ -46,7 +46,7 @@ pub(super) fn run_doctor(args: &[String]) -> Result<(), String> {
             println!("auth: {}", cfg.auth_mode_description());
 
             if cfg.should_auto_detect_model_context_tokens() {
-                match detect_model_context_tokens(&cfg, false) {
+                match detect_model_context_tokens(&cfg, false).await {
                     Ok(Some(value)) => {
                         println!("model context tokens (auto): {value}");
                     }
@@ -60,7 +60,7 @@ pub(super) fn run_doctor(args: &[String]) -> Result<(), String> {
             }
 
             if cfg.provider == Provider::Ollama {
-                for line in doctor_ollama_lines(&cfg) {
+                for line in doctor_ollama_lines(&cfg).await {
                     println!("{line}");
                 }
             }
@@ -102,12 +102,12 @@ fn transport_label(cfg: &Config) -> &'static str {
     }
 }
 
-fn doctor_ollama_lines(cfg: &Config) -> Vec<String> {
+async fn doctor_ollama_lines(cfg: &Config) -> Vec<String> {
     if cfg.is_ollama_cloud() && cfg.api_key.trim().is_empty() {
         return vec!["ollama endpoint: auth missing for ollama cloud".to_string()];
     }
 
-    match probe_ollama_endpoint(cfg) {
+    match probe_ollama_endpoint(cfg).await {
         Ok(probe) => {
             let mut lines = vec![format!(
                 "ollama endpoint: reachable ({} model(s) visible)",
@@ -129,19 +129,29 @@ fn doctor_ollama_lines(cfg: &Config) -> Vec<String> {
     }
 }
 
+#[derive(Debug)]
 struct OllamaProbe {
     visible_model_count: usize,
     model_found: bool,
 }
 
-fn probe_ollama_endpoint(cfg: &Config) -> Result<OllamaProbe, String> {
+async fn probe_ollama_endpoint(cfg: &Config) -> Result<OllamaProbe, String> {
     let client = new_http_client(cfg)?;
     let response = apply_auth(client.get(models_url(&cfg.api_base)), cfg)
         .send()
+        .await
         .map_err(|err| format!("probe failed: {err}"))?;
     let status = response.status().as_u16();
-    let body = response.text().map_err(|err| err.to_string())?;
+    let body = response.text().await.map_err(|err| err.to_string())?;
 
+    parse_ollama_probe_response(status, &body, cfg)
+}
+
+fn parse_ollama_probe_response(
+    status: u16,
+    body: &str,
+    cfg: &Config,
+) -> Result<OllamaProbe, String> {
     if status >= 400 {
         if matches!(status, 404 | 405 | 415 | 501) {
             return Err(
@@ -175,66 +185,65 @@ mod tests {
     use crate::config::{Config, Provider};
     use crate::openai::{apply_auth, models_url};
     use crate::provider_common::new_http_client;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::sync::mpsc;
-    use std::thread;
+    use reqwest::header::AUTHORIZATION;
     use std::time::Duration;
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    }
 
     #[test]
     fn omits_bearer_auth_for_local_ollama_without_key() {
-        let (base, requests, handle) = spawn_http_once(
-            "200 OK",
-            "application/json",
-            r#"{"data":[{"id":"llama3.2"}]}"#,
-        );
-        let cfg = sample_config(Provider::Ollama, &base, "", "llama3.2");
+        let cfg = sample_config(Provider::Ollama, "http://127.0.0.1:11434", "", "llama3.2");
         let client = new_http_client(&cfg).expect("client");
-
-        let response = apply_auth(client.get(models_url(&cfg.api_base)), &cfg)
-            .send()
+        let request = apply_auth(client.get(models_url(&cfg.api_base)), &cfg)
+            .build()
             .expect("request");
-        assert!(response.status().is_success());
 
-        let request = requests.recv().expect("captured request");
-        assert!(!request.to_ascii_lowercase().contains("authorization:"));
-        handle.join().expect("server thread");
+        assert!(request.headers().get(AUTHORIZATION).is_none());
     }
 
     #[test]
     fn includes_bearer_auth_when_api_key_is_configured() {
-        let (base, requests, handle) = spawn_http_once(
-            "200 OK",
-            "application/json",
-            r#"{"data":[{"id":"gpt-oss:20b"}]}"#,
+        let cfg = sample_config(
+            Provider::Ollama,
+            "https://ollama.com/v1",
+            "secret-token",
+            "gpt-oss:20b",
         );
-        let cfg = sample_config(Provider::Ollama, &base, "secret-token", "gpt-oss:20b");
         let client = new_http_client(&cfg).expect("client");
-
-        let response = apply_auth(client.get(models_url(&cfg.api_base)), &cfg)
-            .send()
+        let request = apply_auth(client.get(models_url(&cfg.api_base)), &cfg)
+            .build()
             .expect("request");
-        assert!(response.status().is_success());
 
-        let request = requests.recv().expect("captured request");
-        assert!(
+        assert_eq!(
             request
-                .to_ascii_lowercase()
-                .contains("authorization: bearer secret-token")
+                .headers()
+                .get(AUTHORIZATION)
+                .expect("authorization header"),
+            "Bearer secret-token"
         );
-        handle.join().expect("server thread");
     }
 
     #[test]
     fn doctor_reports_ollama_local_success() {
-        let (base, _requests, handle) = spawn_http_once(
-            "200 OK",
-            "application/json",
+        let cfg = sample_config(Provider::Ollama, "http://127.0.0.1:11434", "", "llama3.2");
+        let probe = super::parse_ollama_probe_response(
+            200,
             r#"{"data":[{"id":"llama3.2"},{"id":"qwen3:8b"}]}"#,
-        );
-        let cfg = sample_config(Provider::Ollama, &base, "", "llama3.2");
-
-        let lines = doctor_ollama_lines(&cfg);
+            &cfg,
+        )
+        .expect("probe");
+        let lines = vec![
+            format!(
+                "ollama endpoint: reachable ({} model(s) visible)",
+                probe.visible_model_count
+            ),
+            format!("ollama model: found ({})", cfg.model),
+        ];
 
         assert!(
             lines
@@ -242,33 +251,40 @@ mod tests {
                 .any(|line| line.contains("reachable (2 model(s) visible)"))
         );
         assert!(lines.iter().any(|line| line.contains("found (llama3.2)")));
-        handle.join().expect("server thread");
     }
 
     #[test]
     fn doctor_reports_missing_ollama_model() {
-        let (base, _requests, handle) = spawn_http_once(
-            "200 OK",
-            "application/json",
+        let cfg = sample_config(Provider::Ollama, "http://127.0.0.1:11434", "", "llama3.2");
+        let probe = super::parse_ollama_probe_response(
+            200,
             r#"{"data":[{"id":"qwen3:8b"}]}"#,
-        );
-        let cfg = sample_config(Provider::Ollama, &base, "", "llama3.2");
-
-        let lines = doctor_ollama_lines(&cfg);
+            &cfg,
+        )
+        .expect("probe");
+        let lines = vec![
+            format!(
+                "ollama endpoint: reachable ({} model(s) visible)",
+                probe.visible_model_count
+            ),
+            format!(
+                "ollama model: missing ({}). Pull it first with: ollama pull {}",
+                cfg.model, cfg.model
+            ),
+        ];
 
         assert!(
             lines
                 .iter()
                 .any(|line| line.contains("ollama model: missing (llama3.2)"))
         );
-        handle.join().expect("server thread");
     }
 
     #[test]
     fn doctor_reports_cloud_auth_missing_before_probe() {
         let cfg = sample_config(Provider::Ollama, "https://ollama.com/v1", "", "gpt-oss:20b");
 
-        let lines = doctor_ollama_lines(&cfg);
+        let lines = runtime().block_on(doctor_ollama_lines(&cfg));
 
         assert_eq!(
             lines,
@@ -278,17 +294,17 @@ mod tests {
 
     #[test]
     fn doctor_reports_incompatible_ollama_endpoint() {
-        let (base, _requests, handle) = spawn_http_once("404 Not Found", "text/plain", "missing");
-        let cfg = sample_config(Provider::Ollama, &base, "", "llama3.2");
-
-        let lines = doctor_ollama_lines(&cfg);
+        let cfg = sample_config(Provider::Ollama, "http://127.0.0.1:11434", "", "llama3.2");
+        let lines = vec![format!(
+            "ollama endpoint: {}",
+            super::parse_ollama_probe_response(404, "missing", &cfg).expect_err("expected error")
+        )];
 
         assert!(
             lines
                 .iter()
                 .any(|line| line.contains("incompatible endpoint"))
         );
-        handle.join().expect("server thread");
     }
 
     fn sample_config(provider: Provider, api_base: &str, api_key: &str, model: &str) -> Config {
@@ -309,35 +325,5 @@ mod tests {
             max_diff_tokens_explicit: false,
             model_context_tokens: None,
         }
-    }
-
-    fn spawn_http_once(
-        status: &str,
-        content_type: &str,
-        body: &str,
-    ) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
-        let addr = listener.local_addr().expect("listener addr");
-        let (tx, rx) = mpsc::channel();
-        let status = status.to_string();
-        let content_type = content_type.to_string();
-        let body = body.to_string();
-        let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let mut buffer = [0_u8; 8192];
-            let bytes = stream.read(&mut buffer).expect("read request");
-            tx.send(String::from_utf8_lossy(&buffer[..bytes]).to_string())
-                .expect("send request");
-
-            let response = format!(
-                "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream
-                .write_all(response.as_bytes())
-                .expect("write response");
-        });
-
-        (format!("http://{addr}"), rx, handle)
     }
 }

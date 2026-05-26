@@ -30,9 +30,9 @@ struct CommitArgs {
     args: Vec<String>,
 }
 
-pub fn run(args: Vec<String>) -> Result<(), String> {
+pub async fn run(args: Vec<String>) -> Result<(), String> {
     if args.is_empty() || args[0].starts_with('-') {
-        return run_commit(&args);
+        return run_commit(&args).await;
     }
 
     let cli = Cli::try_parse_from(
@@ -41,7 +41,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
     .map_err(|err| err.to_string())?;
 
     match cli.command {
-        Commands::Generate => run_generate(),
+        Commands::Generate => run_generate().await,
         Commands::InitAlias(InitAliasArgs { force }) => {
             let args = if force {
                 vec!["--force".to_string()]
@@ -50,8 +50,8 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             };
             run_init_alias(&args)
         }
-        Commands::Doctor => run_doctor(&[]),
-        Commands::Commit(CommitArgs { args }) => run_commit(&args),
+        Commands::Doctor => run_doctor(&[]).await,
+        Commands::Commit(CommitArgs { args }) => run_commit(&args).await,
     }
 }
 
@@ -61,14 +61,26 @@ mod tests {
 
     #[test]
     fn rejects_unknown_subcommand() {
-        let err = run(vec!["wat".to_string()]).expect_err("expected usage error");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let err = rt
+            .block_on(run(vec!["wat".to_string()]))
+            .expect_err("expected usage error");
         assert!(err.contains("Usage:"));
         assert!(err.contains("git-ai-commit"));
     }
 
     #[test]
     fn forwards_leading_flags_to_commit_mode() {
-        let err = run(vec!["--edit".to_string()]).expect_err("expected commit parse error");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let err = rt
+            .block_on(run(vec!["--edit".to_string()]))
+            .expect_err("expected commit parse error");
         assert!(err.contains("unknown git-ai-commit flag"));
     }
 }

@@ -39,7 +39,7 @@ fn clear_openrouter_context_cache() {
     }
 }
 
-pub(crate) fn resolve_model_context_config(cfg: &Config, debug_provider: bool) -> Config {
+pub(crate) async fn resolve_model_context_config(cfg: &Config, debug_provider: bool) -> Config {
     if !cfg.should_auto_detect_model_context_tokens() {
         return cfg.clone();
     }
@@ -56,7 +56,7 @@ pub(crate) fn resolve_model_context_config(cfg: &Config, debug_provider: bool) -
         return resolved;
     }
 
-    match fetch_openrouter_model_context_tokens(cfg, debug_provider) {
+    match fetch_openrouter_model_context_tokens(cfg, debug_provider).await {
         Ok(Some(value)) => {
             if let Ok(mut cache) = openrouter_context_cache().lock() {
                 cache.insert(cache_key, value);
@@ -70,7 +70,7 @@ pub(crate) fn resolve_model_context_config(cfg: &Config, debug_provider: bool) -
     }
 }
 
-pub(crate) fn detect_model_context_tokens(
+pub(crate) async fn detect_model_context_tokens(
     cfg: &Config,
     debug_provider: bool,
 ) -> Result<Option<usize>, String> {
@@ -87,7 +87,7 @@ pub(crate) fn detect_model_context_tokens(
         return Ok(Some(value));
     }
 
-    let detected = fetch_openrouter_model_context_tokens(cfg, debug_provider)?;
+    let detected = fetch_openrouter_model_context_tokens(cfg, debug_provider).await?;
     if let Some(value) = detected
         && let Ok(mut cache) = openrouter_context_cache().lock()
     {
@@ -96,7 +96,7 @@ pub(crate) fn detect_model_context_tokens(
     Ok(detected)
 }
 
-fn fetch_openrouter_model_context_tokens(
+async fn fetch_openrouter_model_context_tokens(
     cfg: &Config,
     debug_provider: bool,
 ) -> Result<Option<usize>, String> {
@@ -113,10 +113,12 @@ fn fetch_openrouter_model_context_tokens(
 
     let response = apply_auth(client.get(&url), cfg)
         .send()
+        .await
         .map_err(|err| format!("openrouter models lookup failed: {err}"))?;
     let status_code = response.status().as_u16();
     let body = response
         .text()
+        .await
         .map_err(|err| format!("openrouter models lookup failed: {err}"))?;
 
     if status_code >= 400 {
@@ -194,8 +196,13 @@ mod tests {
         );
         let cfg = sample_config(&base, "google/gemma-4-31b-it:free", None);
 
-        let detected =
-            fetch_openrouter_model_context_tokens(&cfg, false).expect("context token lookup");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let detected = rt
+            .block_on(fetch_openrouter_model_context_tokens(&cfg, false))
+            .expect("context token lookup");
 
         assert_eq!(detected, Some(65536));
         handle.join().expect("server thread");
@@ -210,7 +217,11 @@ mod tests {
             Some(12345),
         );
 
-        let resolved = resolve_model_context_config(&cfg, false);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let resolved = rt.block_on(resolve_model_context_config(&cfg, false));
 
         assert_eq!(resolved.model_context_tokens, Some(12345));
     }
@@ -239,7 +250,13 @@ mod tests {
         );
         let cfg = sample_config(&base, "google/gemma-4-31b-it:free", None);
 
-        let detected = fetch_openrouter_model_context_tokens(&cfg, false).expect("lookup result");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let detected = rt
+            .block_on(fetch_openrouter_model_context_tokens(&cfg, false))
+            .expect("lookup result");
 
         assert_eq!(detected, None);
         handle.join().expect("server thread");
@@ -256,7 +273,11 @@ mod tests {
         cfg.max_diff_tokens = Some(20_000);
         cfg.max_diff_tokens_explicit = true;
 
-        let resolved = resolve_model_context_config(&cfg, false);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let resolved = rt.block_on(resolve_model_context_config(&cfg, false));
 
         assert_eq!(resolved.max_diff_tokens, Some(20_000));
     }

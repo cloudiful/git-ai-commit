@@ -1,56 +1,10 @@
 use super::StreamOutput;
 use std::env;
-use std::io::{BufRead, Write};
+use std::io::Write;
 
 const ANSI_RESET: &str = "\x1b[0m";
 const ANSI_SUBJECT: &str = "\x1b[1;36m";
 const ANSI_BODY: &str = "\x1b[2m";
-
-pub(super) fn is_event_stream(content_type: &str) -> bool {
-    content_type
-        .to_ascii_lowercase()
-        .contains("text/event-stream")
-}
-
-pub(super) fn parse_sse_payloads<R, F>(reader: R, mut on_payload: F) -> Result<(), String>
-where
-    R: BufRead,
-    F: FnMut(&str) -> Result<bool, String>,
-{
-    let mut reader = reader;
-    let mut line = String::new();
-    let mut data_lines = Vec::new();
-
-    loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line).map_err(|err| err.to_string())?;
-        if bytes_read == 0 {
-            if !data_lines.is_empty() {
-                let payload = data_lines.join("\n");
-                if !on_payload(&payload)? {
-                    return Ok(());
-                }
-            }
-            return Ok(());
-        }
-
-        let trimmed = line.trim_end_matches(['\r', '\n']);
-        if trimmed.is_empty() {
-            if !data_lines.is_empty() {
-                let payload = data_lines.join("\n");
-                data_lines.clear();
-                if !on_payload(&payload)? {
-                    return Ok(());
-                }
-            }
-            continue;
-        }
-
-        if let Some(payload) = trimmed.strip_prefix("data:") {
-            data_lines.push(payload.trim_start().to_string());
-        }
-    }
-}
 
 pub(crate) struct StreamRenderer {
     output: StreamOutput,
@@ -198,8 +152,48 @@ fn stream_colors_enabled(output: StreamOutput) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_sse_payloads;
+    use std::io::BufRead;
     use std::io::Cursor;
+
+    fn parse_sse_payloads<R, F>(reader: R, mut on_payload: F) -> Result<(), String>
+    where
+        R: BufRead,
+        F: FnMut(&str) -> Result<bool, String>,
+    {
+        let mut reader = reader;
+        let mut line = String::new();
+        let mut data_lines = Vec::new();
+
+        loop {
+            line.clear();
+            let bytes_read = reader.read_line(&mut line).map_err(|err| err.to_string())?;
+            if bytes_read == 0 {
+                if !data_lines.is_empty() {
+                    let payload = data_lines.join("\n");
+                    if !on_payload(&payload)? {
+                        return Ok(());
+                    }
+                }
+                return Ok(());
+            }
+
+            let trimmed = line.trim_end_matches(['\r', '\n']);
+            if trimmed.is_empty() {
+                if !data_lines.is_empty() {
+                    let payload = data_lines.join("\n");
+                    data_lines.clear();
+                    if !on_payload(&payload)? {
+                        return Ok(());
+                    }
+                }
+                continue;
+            }
+
+            if let Some(payload) = trimmed.strip_prefix("data:") {
+                data_lines.push(payload.trim_start().to_string());
+            }
+        }
+    }
 
     #[test]
     fn parses_sse_payloads() {

@@ -17,7 +17,7 @@ use tempfile::NamedTempFile;
 use self::args::{build_ai_commit_args, parse_ai_commit_args, should_bypass_ai_commit};
 use self::confirm::{CommitConfirmation, prompt_for_commit_confirmation};
 
-pub fn run_commit(args: &[String]) -> Result<(), String> {
+pub async fn run_commit(args: &[String]) -> Result<(), String> {
     if should_bypass_ai_commit(args) {
         return run_plain_commit(args);
     }
@@ -29,7 +29,7 @@ pub fn run_commit(args: &[String]) -> Result<(), String> {
         Err(err) => return run_plain_commit_with_notice(&parsed_args.forward_args, &err),
     };
 
-    let cfg = resolve_model_context_config(&cfg, parsed_args.debug_provider);
+    let cfg = resolve_model_context_config(&cfg, parsed_args.debug_provider).await;
 
     let repo_ctx = match collect_repo_context(&cfg) {
         Ok(ctx) => ctx,
@@ -59,7 +59,9 @@ pub fn run_commit(args: &[String]) -> Result<(), String> {
         &repo_ctx,
         stream_output,
         parsed_args.debug_provider,
-    ) {
+    )
+    .await
+    {
         Ok(value) => value,
         Err(err) => return run_plain_commit_with_notice(&parsed_args.forward_args, &err),
     };
@@ -95,8 +97,8 @@ pub fn run_init_alias(args: &[String]) -> Result<(), String> {
     alias::run_init_alias(args)
 }
 
-pub fn run_doctor(args: &[String]) -> Result<(), String> {
-    doctor::run_doctor(args)
+pub async fn run_doctor(args: &[String]) -> Result<(), String> {
+    doctor::run_doctor(args).await
 }
 
 fn run_plain_commit(args: &[String]) -> Result<(), String> {

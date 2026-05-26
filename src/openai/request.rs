@@ -1,57 +1,8 @@
 use crate::git::RepoContext;
-use serde::Serialize;
-use serde_json::Value;
+use reqwest::Url;
 
 pub(crate) const SYSTEM_PROMPT: &str = "You are an expert at writing Git commit messages. Your job is to write a short, clear commit message that summarizes the staged changes.\n\nUse English Conventional Commit style for the subject line.\n\nIf you can accurately express the change in just the subject line, do not include a message body. Only use the body when it provides useful information. Do not repeat information from the subject line in the body.\n\nReturn only the final commit message. Do not explain your reasoning. Do not describe the task. Do not preface the answer. Do not include code fences. Do not include the raw diff in the commit message.\n\nFollow good Git style:\n- Separate the subject from the body with a blank line\n- Keep the subject line within 72 characters\n- Use the imperative mood in the subject line\n- Keep the body short and concise\n- Do not invent behavior not present in the diff";
-pub(crate) const MAX_OUTPUT_TOKENS: usize = 220;
-
-#[derive(Serialize)]
-pub(super) struct ResponsesRequest {
-    pub(super) model: String,
-    pub(super) instructions: String,
-    pub(super) input: Vec<ResponseInputMessage>,
-    pub(super) temperature: f64,
-    pub(super) max_output_tokens: u32,
-    pub(super) stream: bool,
-}
-
-#[derive(Serialize)]
-pub(super) struct ResponseInputMessage {
-    pub(super) role: &'static str,
-    pub(super) content: String,
-}
-
-#[derive(Serialize)]
-pub(super) struct ChatCompletionRequest {
-    pub(super) model: String,
-    pub(super) messages: Vec<ChatMessage>,
-    pub(super) temperature: f64,
-    pub(super) max_tokens: u32,
-    pub(super) stream: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) response_format: Option<ChatResponseFormat>,
-}
-
-#[derive(Serialize)]
-pub(super) struct ChatMessage {
-    pub(super) role: &'static str,
-    pub(super) content: String,
-}
-
-#[derive(Serialize)]
-pub(super) struct ChatResponseFormat {
-    #[serde(rename = "type")]
-    pub(super) format_type: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) json_schema: Option<ChatResponseFormatJsonSchema>,
-}
-
-#[derive(Serialize)]
-pub(super) struct ChatResponseFormatJsonSchema {
-    pub(super) name: &'static str,
-    pub(super) strict: bool,
-    pub(super) schema: Value,
-}
+pub(crate) const MAX_OUTPUT_TOKENS: usize = 4096;
 
 pub(crate) fn build_prompt(repo_ctx: &RepoContext) -> String {
     let mut prompt = prompt_prefix(
@@ -145,17 +96,51 @@ pub(crate) fn models_url(base: &str) -> String {
     api_endpoint_url(base, "models")
 }
 
-fn api_endpoint_url(base: &str, endpoint: &str) -> String {
-    let base = base.trim().trim_end_matches('/');
-    for known_endpoint in ["/chat/completions", "/responses"] {
-        if let Some(prefix) = base.strip_suffix(known_endpoint) {
-            return format!("{}/{}", prefix.trim_end_matches('/'), endpoint);
-        }
+pub(crate) fn api_endpoint_url(base: &str, endpoint: &str) -> String {
+    let mut url = Url::parse(base.trim()).unwrap_or_else(|_| {
+        panic!("invalid ai.commit.apiBase URL {:?}", base);
+    });
+    let normalized = normalized_base_segments(&url);
+    let mut segments = normalized.segments;
+    if !normalized.had_known_endpoint && !segments.last().is_some_and(|segment| *segment == "v1") {
+        segments.push("v1");
     }
-    if base.ends_with("/v1") {
-        format!("{base}/{endpoint}")
-    } else {
-        format!("{base}/v1/{endpoint}")
+    segments.extend(endpoint.split('/'));
+    url.set_path(&format!("/{}", segments.join("/")));
+    url.set_query(None);
+    url.to_string()
+}
+
+struct NormalizedBaseSegments<'a> {
+    segments: Vec<&'a str>,
+    had_known_endpoint: bool,
+}
+
+fn normalized_base_segments(url: &Url) -> NormalizedBaseSegments<'_> {
+    let mut segments = url
+        .path_segments()
+        .map(|segments| {
+            segments
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let had_known_endpoint = match segments.as_slice() {
+        [.., "chat", "completions"] => {
+            segments.truncate(segments.len() - 2);
+            true
+        }
+        [.., "responses"] | [.., "models"] => {
+            segments.truncate(segments.len() - 1);
+            true
+        }
+        _ => false,
+    };
+
+    NormalizedBaseSegments {
+        segments,
+        had_known_endpoint,
     }
 }
 
@@ -177,6 +162,14 @@ mod tests {
         assert_eq!(
             models_url("http://localhost:11434"),
             "http://localhost:11434/v1/models"
+        );
+        assert_eq!(
+            api_endpoint_url("https://example.com/openai/v1/models", "responses"),
+            "https://example.com/openai/v1/responses"
+        );
+        assert_eq!(
+            api_endpoint_url("https://example.com/openai", "chat/completions"),
+            "https://example.com/openai/v1/chat/completions"
         );
     }
 

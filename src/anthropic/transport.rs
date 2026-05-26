@@ -2,8 +2,7 @@ use crate::config::Config;
 use crate::message::{sanitize_message, validate_message};
 use crate::openai::{GenerationMetrics, StreamOutput, StreamRenderer};
 use crate::provider_common::{new_http_client, provider_debug_enabled, truncate_debug_body};
-use crate::provider_transport::{AnthropicTransport, CommitMessageTransport};
-use reqwest::blocking::RequestBuilder;
+use reqwest::RequestBuilder;
 use std::time::Instant;
 
 use super::request::{
@@ -11,7 +10,7 @@ use super::request::{
 };
 use super::response::MessagesResponse;
 
-pub(crate) fn generate_anthropic_message_with_stream_output(
+pub(crate) async fn generate_anthropic_message_with_stream_output(
     cfg: &Config,
     repo_ctx: &crate::git::RepoContext,
     stream_output: StreamOutput,
@@ -52,9 +51,10 @@ pub(crate) fn generate_anthropic_message_with_stream_output(
     let response = apply_auth(client.post(&url), cfg)
         .json(&request)
         .send()
+        .await
         .map_err(|err| err.to_string())?;
     let status = response.status().as_u16();
-    let body = response.text().map_err(|err| err.to_string())?;
+    let body = response.text().await.map_err(|err| err.to_string())?;
     if debug_enabled {
         eprintln!(
             "git-ai-commit: provider debug: anthropic status={} body={}",
@@ -113,18 +113,6 @@ pub(crate) fn generate_anthropic_message_with_stream_output(
             api_duration: started.elapsed(),
         },
     ))
-}
-
-impl CommitMessageTransport for AnthropicTransport {
-    fn generate(
-        &self,
-        cfg: &Config,
-        repo_ctx: &crate::git::RepoContext,
-        stream_output: StreamOutput,
-        debug_provider: bool,
-    ) -> Result<(String, GenerationMetrics), String> {
-        generate_anthropic_message_with_stream_output(cfg, repo_ctx, stream_output, debug_provider)
-    }
 }
 
 fn apply_auth(builder: RequestBuilder, cfg: &Config) -> RequestBuilder {

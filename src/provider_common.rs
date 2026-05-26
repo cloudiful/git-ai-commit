@@ -1,5 +1,5 @@
 use crate::config::Config;
-use reqwest::blocking::Client;
+use reqwest::Client;
 
 pub(crate) fn provider_debug_enabled(debug_provider: bool) -> bool {
     debug_provider
