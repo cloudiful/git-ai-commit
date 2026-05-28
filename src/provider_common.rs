@@ -30,3 +30,11 @@ pub(crate) fn new_http_client(cfg: &Config) -> Result<Client, String> {
     }
     builder.build().map_err(|err| err.to_string())
 }
+
+pub(crate) fn new_streaming_http_client(cfg: &Config) -> Result<Client, String> {
+    let mut builder = Client::builder().connect_timeout(cfg.timeout);
+    if !cfg.use_env_proxy {
+        builder = builder.no_proxy();
+    }
+    builder.build().map_err(|err| err.to_string())
+}
