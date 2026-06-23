@@ -4,7 +4,8 @@ pub const MAX_SUBJECT_CHARS: usize = 72;
 
 pub fn sanitize_message(message: &str) -> String {
     let normalized = message.replace("\r\n", "\n");
-    let trimmed = normalized
+    let without_thinking = strip_thinking_sections(&normalized);
+    let trimmed = without_thinking
         .trim()
         .trim_start_matches("```")
         .trim_end_matches("```");
@@ -21,6 +22,43 @@ pub fn sanitize_message(message: &str) -> String {
 
     let extracted = extract_commit_message(&sanitized);
     enforce_subject_limit(&extracted)
+}
+
+fn strip_thinking_sections(input: &str) -> String {
+    const OPEN_TAG: &str = "<think>";
+    const CLOSE_TAG: &str = "</think>";
+
+    let mut output = String::with_capacity(input.len());
+    let mut cursor = 0;
+    let mut in_thinking = false;
+
+    while cursor < input.len() {
+        let remaining = &input[cursor..];
+
+        if !in_thinking && remaining.starts_with(OPEN_TAG) {
+            in_thinking = true;
+            cursor += OPEN_TAG.len();
+            continue;
+        }
+
+        if in_thinking && remaining.starts_with(CLOSE_TAG) {
+            in_thinking = false;
+            cursor += CLOSE_TAG.len();
+            continue;
+        }
+
+        let mut chars = remaining.chars();
+        let Some(ch) = chars.next() else {
+            break;
+        };
+
+        if !in_thinking {
+            output.push(ch);
+        }
+        cursor += ch.len_utf8();
+    }
+
+    output
 }
 
 pub fn validate_message(message: &str) -> Result<(), String> {
@@ -257,5 +295,13 @@ mod tests {
             sanitized,
             "feat: auto-scale max_diff_tokens when model context is known"
         );
+    }
+
+    #[test]
+    fn strips_thinking_blocks_before_extracting_message() {
+        let sanitized = sanitize_message(
+            "<think>\nconsidering staged diff\n</think>\nfeat: keep visible text only\n\nBody text",
+        );
+        assert_eq!(sanitized, "feat: keep visible text only\n\nBody text");
     }
 }
