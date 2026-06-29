@@ -1,13 +1,10 @@
 use super::{
-    ResponseTextAccumulator, append_response_stream_event_text, should_fallback_from_responses,
+    ResponseTextAccumulator, append_response_stream_event_text, extract_chat_message,
+    extract_response_text, should_fallback_from_responses,
     should_fallback_from_responses_message, should_retry_without_stream_message,
 };
 use crate::openai::{StreamOutput, StreamRenderer};
-use async_openai::types::responses::{
-    AssistantRole, OutputContent, OutputItem, OutputMessage, OutputMessageContent, OutputStatus,
-    OutputTextContent, ResponseContentPartDoneEvent, ResponseOutputItemDoneEvent,
-    ResponseStreamEvent, ResponseTextDeltaEvent, ResponseTextDoneEvent,
-};
+use serde_json::json;
 
 #[test]
 fn falls_back_when_responses_endpoint_is_unsupported() {
@@ -56,45 +53,85 @@ fn does_not_fallback_on_model_not_found_status_alone() {
 }
 
 #[test]
+fn extracts_response_text_from_output_items() {
+    let payload = json!({
+        "output": [{
+            "type": "message",
+            "id": "msg_1",
+            "content": [{
+                "type": "output_text",
+                "text": "feat: add parser"
+            }]
+        }]
+    });
+
+    assert_eq!(
+        extract_response_text(payload, false).unwrap(),
+        "feat: add parser"
+    );
+}
+
+#[test]
+fn extracts_chat_message_from_json_content() {
+    let payload = json!({
+        "choices": [{
+            "message": {
+                "content": "feat: add parser"
+            }
+        }]
+    });
+
+    assert_eq!(
+        extract_chat_message(payload, false).unwrap(),
+        "feat: add parser"
+    );
+}
+
+#[test]
 fn deduplicates_delta_done_and_output_item_events() {
     let mut renderer = StreamRenderer::new(StreamOutput::None);
     let mut accumulator = ResponseTextAccumulator::default();
 
     for event in [
-        ResponseStreamEvent::ResponseOutputTextDelta(ResponseTextDeltaEvent {
-            sequence_number: 1,
-            item_id: "msg_1".to_string(),
-            output_index: 0,
-            content_index: 0,
-            delta: "feat: add parser".to_string(),
-            logprobs: None,
+        json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_1",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": "feat: add parser"
         }),
-        ResponseStreamEvent::ResponseOutputTextDone(ResponseTextDoneEvent {
-            sequence_number: 2,
-            item_id: "msg_1".to_string(),
-            output_index: 0,
-            content_index: 0,
-            text: "feat: add parser".to_string(),
-            logprobs: None,
+        json!({
+            "type": "response.output_text.done",
+            "item_id": "msg_1",
+            "output_index": 0,
+            "content_index": 0,
+            "text": "feat: add parser"
         }),
-        ResponseStreamEvent::ResponseContentPartDone(ResponseContentPartDoneEvent {
-            sequence_number: 3,
-            item_id: "msg_1".to_string(),
-            output_index: 0,
-            content_index: 0,
-            part: OutputContent::OutputText(output_text("feat: add parser")),
+        json!({
+            "type": "response.content_part.done",
+            "item_id": "msg_1",
+            "output_index": 0,
+            "content_index": 0,
+            "part": {
+                "type": "output_text",
+                "text": "feat: add parser"
+            }
         }),
-        ResponseStreamEvent::ResponseOutputItemDone(ResponseOutputItemDoneEvent {
-            sequence_number: 4,
-            output_index: 0,
-            item: OutputItem::Message(output_message(
-                "msg_1",
-                vec![OutputMessageContent::OutputText(output_text("feat: add parser"))],
-            )),
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "type": "message",
+                "id": "msg_1",
+                "content": [{
+                    "type": "output_text",
+                    "text": "feat: add parser"
+                }]
+            }
         }),
     ] {
         let result =
-            append_response_stream_event_text(event, &mut renderer, &mut accumulator, false);
+            append_response_stream_event_text(&event, &mut renderer, &mut accumulator, false);
         assert_eq!(result.unwrap(), None);
     }
 
@@ -107,40 +144,47 @@ fn backfills_done_only_stream_parts_once_in_order() {
     let mut accumulator = ResponseTextAccumulator::default();
 
     for event in [
-        ResponseStreamEvent::ResponseContentPartDone(ResponseContentPartDoneEvent {
-            sequence_number: 1,
-            item_id: "msg_2".to_string(),
-            output_index: 0,
-            content_index: 0,
-            part: OutputContent::OutputText(output_text("refactor: rewrite provider path\n\n")),
+        json!({
+            "type": "response.content_part.done",
+            "item_id": "msg_2",
+            "output_index": 0,
+            "content_index": 0,
+            "part": {
+                "type": "output_text",
+                "text": "refactor: rewrite provider path\n\n"
+            }
         }),
-        ResponseStreamEvent::ResponseContentPartDone(ResponseContentPartDoneEvent {
-            sequence_number: 2,
-            item_id: "msg_2".to_string(),
-            output_index: 0,
-            content_index: 1,
-            part: OutputContent::OutputText(output_text(
-                "Prefer responses first and retry chat as fallback.",
-            )),
+        json!({
+            "type": "response.content_part.done",
+            "item_id": "msg_2",
+            "output_index": 0,
+            "content_index": 1,
+            "part": {
+                "type": "output_text",
+                "text": "Prefer responses first and retry chat as fallback."
+            }
         }),
-        ResponseStreamEvent::ResponseOutputItemDone(ResponseOutputItemDoneEvent {
-            sequence_number: 3,
-            output_index: 0,
-            item: OutputItem::Message(output_message(
-                "msg_2",
-                vec![
-                    OutputMessageContent::OutputText(output_text(
-                        "refactor: rewrite provider path\n\n",
-                    )),
-                    OutputMessageContent::OutputText(output_text(
-                        "Prefer responses first and retry chat as fallback.",
-                    )),
-                ],
-            )),
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "type": "message",
+                "id": "msg_2",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "refactor: rewrite provider path\n\n"
+                    },
+                    {
+                        "type": "output_text",
+                        "text": "Prefer responses first and retry chat as fallback."
+                    }
+                ]
+            }
         }),
     ] {
         let result =
-            append_response_stream_event_text(event, &mut renderer, &mut accumulator, false);
+            append_response_stream_event_text(&event, &mut renderer, &mut accumulator, false);
         assert_eq!(result.unwrap(), None);
     }
 
@@ -148,22 +192,4 @@ fn backfills_done_only_stream_parts_once_in_order() {
         accumulator.content(),
         "refactor: rewrite provider path\n\nPrefer responses first and retry chat as fallback."
     );
-}
-
-fn output_text(text: &str) -> OutputTextContent {
-    OutputTextContent {
-        annotations: Vec::new(),
-        logprobs: None,
-        text: text.to_string(),
-    }
-}
-
-fn output_message(id: &str, content: Vec<OutputMessageContent>) -> OutputMessage {
-    OutputMessage {
-        content,
-        id: id.to_string(),
-        role: AssistantRole::Assistant,
-        phase: None,
-        status: OutputStatus::Completed,
-    }
 }

@@ -4,20 +4,17 @@ mod tests;
 use crate::message::sanitize_message;
 use crate::openai::StreamRenderer;
 use crate::provider_common::truncate_debug_body;
-use async_openai::types::chat::{
-    ChatCompletionResponseStream, CreateChatCompletionResponse,
-};
-use async_openai::types::responses::{
-    OutputContent, OutputItem, OutputMessageContent, Response, ResponseStreamEvent,
-};
-use futures::StreamExt;
+use serde_json::Value;
 use std::collections::HashMap;
 
-pub(super) fn extract_response_text(response: Response, debug_enabled: bool) -> Result<String, String> {
+pub(super) fn extract_response_text(response: Value, debug_enabled: bool) -> Result<String, String> {
     log_response_payload("responses", &response, debug_enabled);
 
     let message = response
-        .output_text()
+        .get("output_text")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| extract_response_output_text(&response))
         .map(|text| sanitize_message(&text))
         .filter(|text| !text.is_empty());
 
@@ -34,23 +31,27 @@ pub(super) fn extract_response_text(response: Response, debug_enabled: bool) -> 
     Err("responses request returned no output text".to_string())
 }
 
-pub(super) fn extract_chat_message(
-    response: CreateChatCompletionResponse,
-    debug_enabled: bool,
-) -> Result<String, String> {
+pub(super) fn extract_chat_message(response: Value, debug_enabled: bool) -> Result<String, String> {
     log_response_payload("chat.completions", &response, debug_enabled);
 
     let content = response
-        .choices
-        .first()
-        .and_then(|choice| choice.message.content.as_deref())
-        .map(sanitize_message)
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(value_as_text)
+        .map(|text| sanitize_message(&text))
         .filter(|text| !text.is_empty())
         .ok_or_else(|| "chat completion returned no choices".to_string())?;
     Ok(content)
 }
 
-fn log_response_payload<T: serde::Serialize>(endpoint: &str, payload: &T, debug_enabled: bool) {
+pub(super) fn log_response_payload<T: serde::Serialize>(
+    endpoint: &str,
+    payload: &T,
+    debug_enabled: bool,
+) {
     if !debug_enabled {
         return;
     }
@@ -76,27 +77,8 @@ fn log_response_payload<T: serde::Serialize>(endpoint: &str, payload: &T, debug_
     }
 }
 
-pub(super) async fn collect_chat_completion_stream(
-    mut stream: ChatCompletionResponseStream,
-    renderer: &mut StreamRenderer,
-) -> Result<String, String> {
-    let mut content = String::new();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|err| err.to_string())?;
-        for choice in chunk.choices {
-            if let Some(delta) = choice.delta.content {
-                renderer.push(&delta).map_err(|err| err.to_string())?;
-                content.push_str(&delta);
-            }
-        }
-    }
-
-    let sanitized = sanitize_message(&content);
-    if sanitized.is_empty() {
-        return Err("chat completion returned no stream chunks".to_string());
-    }
-    Ok(sanitized)
+pub(super) fn log_json_payload(endpoint: &str, payload: &Value, debug_enabled: bool) {
+    log_response_payload(endpoint, payload, debug_enabled);
 }
 
 pub(super) fn should_fallback_from_responses(status_code: u16, error_message: &str) -> bool {
@@ -135,7 +117,7 @@ pub(super) fn should_retry_without_stream_message(error_message: &str) -> bool {
 }
 
 pub(super) fn append_response_stream_event_text(
-    event: ResponseStreamEvent,
+    event: &Value,
     renderer: &mut StreamRenderer,
     accumulator: &mut ResponseTextAccumulator,
     debug_enabled: bool,
@@ -144,44 +126,80 @@ pub(super) fn append_response_stream_event_text(
         log_response_payload("responses.stream.event", &event, true);
     }
 
-    match event {
-        ResponseStreamEvent::ResponseOutputTextDelta(event) => {
+    match event.get("type").and_then(Value::as_str) {
+        Some("response.output_text.delta") => {
             accumulator.push_delta(
-                &event.item_id,
-                event.output_index,
-                event.content_index,
-                &event.delta,
+                required_str(event, "item_id")?,
+                required_u32(event, "output_index")?,
+                required_u32(event, "content_index")?,
+                required_str(event, "delta")?,
                 renderer,
             )?;
             Ok(None)
         }
-        ResponseStreamEvent::ResponseOutputTextDone(event) => {
+        Some("response.output_text.done") => {
             accumulator.push_slot_text_if_missing(
-                &event.item_id,
-                event.output_index,
-                event.content_index,
-                &event.text,
+                required_str(event, "item_id")?,
+                required_u32(event, "output_index")?,
+                required_u32(event, "content_index")?,
+                required_str(event, "text")?,
                 renderer,
             )?;
             Ok(None)
         }
-        ResponseStreamEvent::ResponseContentPartDone(event) => {
-            accumulator.push_output_content_if_missing(
-                &event.item_id,
-                event.output_index,
-                event.content_index,
-                &event.part,
+        Some("response.content_part.done") => {
+            accumulator.push_output_text_if_missing_from_value(
+                required_str(event, "item_id")?,
+                required_u32(event, "output_index")?,
+                required_u32(event, "content_index")?,
+                event.get("part")
+                    .ok_or_else(|| "responses stream event missing part".to_string())?,
                 renderer,
             )?;
             Ok(None)
         }
-        ResponseStreamEvent::ResponseOutputItemDone(event) => {
-            accumulator.push_output_item_if_missing(event.output_index, &event.item, renderer)?;
+        Some("response.output_item.done") => {
+            accumulator.push_output_item_if_missing_from_value(
+                required_u32(event, "output_index")?,
+                event.get("item")
+                    .ok_or_else(|| "responses stream event missing item".to_string())?,
+                renderer,
+            )?;
             Ok(None)
         }
-        ResponseStreamEvent::ResponseError(event) => Ok(Some(event.message)),
+        Some("error") | Some("response.error") => Ok(extract_error_message(event)),
         _ => Ok(None),
     }
+}
+
+pub(super) fn extract_error_message(event: &Value) -> Option<String> {
+    event
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            event.get("error").and_then(|error| {
+                error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .or_else(|| Some(error.to_string()))
+            })
+        })
+}
+
+pub(super) fn extract_chat_stream_delta(event: &Value) -> String {
+    event.get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|choice| {
+            choice
+                .get("delta")
+                .and_then(|delta| delta.get("content"))
+                .and_then(value_as_text)
+        })
+        .collect()
 }
 
 fn has_responses_endpoint_unsupported_signal(error_message: &str) -> bool {
@@ -244,39 +262,53 @@ impl ResponseTextAccumulator {
         )
     }
 
-    fn push_output_content_if_missing(
+    fn push_output_text_if_missing_from_value(
         &mut self,
         item_id: &str,
         output_index: u32,
         content_index: u32,
-        part: &OutputContent,
+        part: &Value,
         renderer: &mut StreamRenderer,
     ) -> Result<(), String> {
-        if let OutputContent::OutputText(text) = part {
+        if part.get("type").and_then(Value::as_str) != Some("output_text") {
+            return Ok(());
+        }
+
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
             self.push_text_if_missing(
                 ResponseTextSlotKey::new(item_id, output_index, content_index),
-                &text.text,
+                text,
                 renderer,
             )?;
         }
         Ok(())
     }
 
-    fn push_output_item_if_missing(
+    fn push_output_item_if_missing_from_value(
         &mut self,
         output_index: u32,
-        item: &OutputItem,
+        item: &Value,
         renderer: &mut StreamRenderer,
     ) -> Result<(), String> {
-        let OutputItem::Message(message) = item else {
+        if item.get("type").and_then(Value::as_str) != Some("message") {
+            return Ok(());
+        }
+
+        let Some(message_id) = item.get("id").and_then(Value::as_str) else {
+            return Ok(());
+        };
+        let Some(content) = item.get("content").and_then(Value::as_array) else {
             return Ok(());
         };
 
-        for (content_index, part) in message.content.iter().enumerate() {
-            if let OutputMessageContent::OutputText(text) = part {
+        for (content_index, part) in content.iter().enumerate() {
+            if part.get("type").and_then(Value::as_str) != Some("output_text") {
+                continue;
+            }
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
                 self.push_text_if_missing(
-                    ResponseTextSlotKey::new(&message.id, output_index, content_index as u32),
-                    &text.text,
+                    ResponseTextSlotKey::new(message_id, output_index, content_index as u32),
+                    text,
                     renderer,
                 )?;
             }
@@ -342,4 +374,71 @@ impl ResponseTextSlotKey {
 #[derive(Default)]
 struct ResponseTextSlot {
     emitted: bool,
+}
+
+fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("responses stream event missing string field {key}"))
+}
+
+fn required_u32(value: &Value, key: &str) -> Result<u32, String> {
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| format!("responses stream event missing integer field {key}"))
+}
+
+fn extract_response_output_text(response: &Value) -> Option<String> {
+    let output = response.get("output")?.as_array()?;
+    let mut out = String::new();
+
+    for item in output {
+        if item.get("type").and_then(Value::as_str) != Some("message") {
+            continue;
+        }
+        let Some(parts) = item.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for part in parts {
+            if part.get("type").and_then(Value::as_str) != Some("output_text") {
+                continue;
+            }
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                out.push_str(text);
+            }
+        }
+    }
+
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn value_as_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(items) => {
+            let mut out = String::new();
+            for item in items {
+                if let Some(text) = item
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.as_str())
+                {
+                    out.push_str(text);
+                }
+            }
+            if out.is_empty() {
+                None
+            } else {
+                Some(out)
+            }
+        }
+        _ => None,
+    }
 }
