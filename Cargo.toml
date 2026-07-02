@@ -8,7 +8,7 @@ async-openai = { version = "0.41.1", default-features = false, features = ["rust
 clap = { version = "4.6.1", features = [ "derive" ] }
 config = { package = "cloudiful-config", version = "0.6.3" }
 futures = "0.3"
-redactor = { package = "cloudiful-redactor", version = "0.2.9" }
+redactor = { package = "cloudiful-redactor", version = "0.3.1" }
 reqwest = { version = "0.13.4", default-features = false, features = [ "json", "rustls" ] }
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
