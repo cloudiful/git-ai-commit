@@ -8,6 +8,7 @@ fn accepts_git_style_boolean_values() {
     env.set_required_openai_env();
     env.set_env("GIT_AI_COMMIT_CONFIRM_COMMIT", Some("yes"));
     env.set_env("GIT_AI_COMMIT_OPEN_EDITOR", Some("yes"));
+    env.set_env("GIT_AI_COMMIT_ENABLE_FALLBACK", Some("yes"));
     env.set_env("GIT_AI_COMMIT_REDACT_SECRETS", Some("on"));
     env.set_env("GIT_AI_COMMIT_SHOW_TIMING", Some("1"));
     env.set_env("GIT_AI_COMMIT_USE_ENV_PROXY", Some("on"));
@@ -16,6 +17,7 @@ fn accepts_git_style_boolean_values() {
 
     assert!(cfg.confirm_commit);
     assert!(cfg.open_editor);
+    assert!(cfg.enable_fallback);
     assert!(cfg.redact_secrets);
     assert!(cfg.show_timing);
     assert!(cfg.use_env_proxy);
@@ -29,6 +31,7 @@ fn accepts_false_git_style_boolean_values_from_git_config() {
     env.write_git_config("ai.commit.model", "gpt-4.1-mini");
     env.write_git_config("ai.commit.confirmCommit", "no");
     env.write_git_config("ai.commit.openEditor", "no");
+    env.write_git_config("ai.commit.enableFallback", "off");
     env.write_git_config("ai.commit.redactSecrets", "off");
     env.write_git_config("ai.commit.showTiming", "0");
     env.write_git_config("ai.commit.useEnvProxy", "off");
@@ -37,6 +40,7 @@ fn accepts_false_git_style_boolean_values_from_git_config() {
 
     assert!(!cfg.confirm_commit);
     assert!(!cfg.open_editor);
+    assert!(!cfg.enable_fallback);
     assert!(!cfg.redact_secrets);
     assert!(!cfg.show_timing);
     assert!(!cfg.use_env_proxy);

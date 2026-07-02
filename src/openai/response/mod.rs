@@ -7,7 +7,10 @@ use crate::provider_common::truncate_debug_body;
 use serde_json::Value;
 use std::collections::HashMap;
 
-pub(super) fn extract_response_text(response: Value, debug_enabled: bool) -> Result<String, String> {
+pub(super) fn extract_response_text(
+    response: Value,
+    debug_enabled: bool,
+) -> Result<String, String> {
     log_response_payload("responses", &response, debug_enabled);
 
     let message = response
@@ -98,10 +101,7 @@ pub(super) fn should_fallback_from_responses_message(error_message: &str) -> boo
 }
 
 pub(super) fn should_fallback_from_empty_responses_payload(error_message: &str) -> bool {
-    matches!(
-        error_message,
-        "responses request returned no output text"
-    )
+    matches!(error_message, "responses request returned no output text")
 }
 
 pub(super) fn should_retry_without_stream_message(error_message: &str) -> bool {
@@ -152,7 +152,8 @@ pub(super) fn append_response_stream_event_text(
                 required_str(event, "item_id")?,
                 required_u32(event, "output_index")?,
                 required_u32(event, "content_index")?,
-                event.get("part")
+                event
+                    .get("part")
                     .ok_or_else(|| "responses stream event missing part".to_string())?,
                 renderer,
             )?;
@@ -161,7 +162,8 @@ pub(super) fn append_response_stream_event_text(
         Some("response.output_item.done") => {
             accumulator.push_output_item_if_missing_from_value(
                 required_u32(event, "output_index")?,
-                event.get("item")
+                event
+                    .get("item")
                     .ok_or_else(|| "responses stream event missing item".to_string())?,
                 renderer,
             )?;
@@ -189,7 +191,8 @@ pub(super) fn extract_error_message(event: &Value) -> Option<String> {
 }
 
 pub(super) fn extract_chat_stream_delta(event: &Value) -> String {
-    event.get("choices")
+    event
+        .get("choices")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
@@ -412,11 +415,7 @@ fn extract_response_output_text(response: &Value) -> Option<String> {
         }
     }
 
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 fn value_as_text(value: &Value) -> Option<String> {
@@ -433,11 +432,7 @@ fn value_as_text(value: &Value) -> Option<String> {
                     out.push_str(text);
                 }
             }
-            if out.is_empty() {
-                None
-            } else {
-                Some(out)
-            }
+            if out.is_empty() { None } else { Some(out) }
         }
         _ => None,
     }

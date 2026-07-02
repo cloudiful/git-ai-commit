@@ -256,12 +256,9 @@ mod tests {
     #[test]
     fn doctor_reports_missing_ollama_model() {
         let cfg = sample_config(Provider::Ollama, "http://127.0.0.1:11434", "", "llama3.2");
-        let probe = super::parse_ollama_probe_response(
-            200,
-            r#"{"data":[{"id":"qwen3:8b"}]}"#,
-            &cfg,
-        )
-        .expect("probe");
+        let probe =
+            super::parse_ollama_probe_response(200, r#"{"data":[{"id":"qwen3:8b"}]}"#, &cfg)
+                .expect("probe");
         let lines = vec![
             format!(
                 "ollama endpoint: reachable ({} model(s) visible)",
@@ -315,6 +312,7 @@ mod tests {
             model: model.to_string(),
             confirm_commit: true,
             open_editor: false,
+            enable_fallback: false,
             redact_secrets: true,
             redaction_rules: crate::config::default_redaction_rules(),
             show_timing: true,

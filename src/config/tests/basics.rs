@@ -10,6 +10,7 @@ fn defaults_confirm_commit_to_true_and_open_editor_to_false() {
     let cfg = load_config().expect("expected config");
     assert!(cfg.confirm_commit);
     assert!(!cfg.open_editor);
+    assert!(!cfg.enable_fallback);
     assert_eq!(cfg.max_diff_tokens, Some(16_000));
     assert_eq!(cfg.model_context_tokens, None);
     assert!(cfg.redaction_rules.domain);
@@ -44,17 +45,21 @@ fn reads_open_editor_from_config_file_and_env_override() {
   "api_key": "token",
   "model": "gpt-4.1-mini",
   "confirm_commit": false,
-  "open_editor": true
+  "open_editor": true,
+  "enable_fallback": true
 }"#,
     );
 
     let from_file = load_config().expect("expected config from file");
     env.set_env("GIT_AI_COMMIT_OPEN_EDITOR", Some("false"));
     env.set_env("GIT_AI_COMMIT_CONFIRM_COMMIT", Some("true"));
+    env.set_env("GIT_AI_COMMIT_ENABLE_FALLBACK", Some("false"));
     let from_env = load_config().expect("expected config from env");
 
     assert!(!from_file.confirm_commit);
     assert!(from_file.open_editor);
+    assert!(from_file.enable_fallback);
     assert!(from_env.confirm_commit);
     assert!(!from_env.open_editor);
+    assert!(!from_env.enable_fallback);
 }

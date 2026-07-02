@@ -290,6 +290,7 @@ mod tests {
             model: model.to_string(),
             confirm_commit: true,
             open_editor: false,
+            enable_fallback: false,
             redact_secrets: true,
             redaction_rules: crate::config::default_redaction_rules(),
             show_timing: true,

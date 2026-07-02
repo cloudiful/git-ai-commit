@@ -2,13 +2,14 @@
 
 AI-generated Git commit messages, wired into normal `git commit` flow.
 
-`git-ai-commit` reads your staged changes, redacts sensitive-looking values before sending anything upstream, asks a model for a Conventional Commit-style message, and then commits with Git. If AI should be skipped or a provider is unusable, it falls back to plain `git commit`.
+`git-ai-commit` reads your staged changes, redacts sensitive-looking values before sending anything upstream, asks a model for a Conventional Commit-style message, and then commits with Git. If AI should be skipped before generation, it falls back to plain `git commit`.
 
 ## Features
 
 - Use it as a real Git subcommand: `git ai-commit`
 - OpenAI-compatible by default
-- Tries `v1/responses` first, then falls back to `v1/chat/completions`
+- Uses `v1/responses` streaming by default
+- Keeps fallback and retry behavior opt-in
 - Supports Ollama and Anthropic-compatible endpoints
 - Redacts sensitive-looking values from diffs before sending prompts
 - Preserves normal Git behavior for flows like `-m`, `--amend`, and path arguments
@@ -103,6 +104,7 @@ Most users only need these keys:
 - `ai.commit.model`
 - `ai.commit.confirmCommit`
 - `ai.commit.openEditor`
+- `ai.commit.enableFallback`
 - `ai.commit.redactSecrets`
 - `ai.commit.maxDiffTokens`
 - `ai.commit.modelContextTokens`
@@ -113,13 +115,15 @@ Environment variables can override config, including:
 - `GIT_AI_COMMIT_API_BASE`
 - `GIT_AI_COMMIT_API_KEY`
 - `GIT_AI_COMMIT_MODEL`
+- `GIT_AI_COMMIT_ENABLE_FALLBACK`
 
 ## Behavior Notes
 
 - AI commit messages are generated from staged changes only
 - Messages are requested in English Conventional Commit style
-- `responses` is attempted first for OpenAI-compatible providers
-- If `responses` is unsupported or returns no usable text, the tool falls back to `chat/completions`
+- OpenAI-compatible providers default to a single `responses` streaming request
+- By default, `responses` errors are surfaced directly instead of retrying or falling back
+- Set `ai.commit.enableFallback` to `true` to opt into retrying without stream and falling back to `chat/completions`
 - Some commit forms intentionally bypass AI and go straight to Git, such as `-m`, `--amend`, `--fixup`, `-a`, and path arguments
 
 ## Large Diffs
@@ -146,4 +150,4 @@ See provider requests and full payloads:
 git ai-commit --debug-provider
 ```
 
-If a provider completes `responses` with output tokens but no visible text, `git-ai-commit` treats that as unusable and falls back when possible.
+If a provider completes `responses` with output tokens but no visible text, `git-ai-commit` treats that as an error by default. Enable `ai.commit.enableFallback` if you want automatic retry and endpoint fallback behavior.

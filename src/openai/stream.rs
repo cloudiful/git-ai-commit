@@ -197,7 +197,8 @@ mod tests {
     use std::io::Cursor;
 
     fn strip_known_ansi(input: &str) -> String {
-        input.replace(ANSI_THINKING, "")
+        input
+            .replace(ANSI_THINKING, "")
             .replace(ANSI_SUBJECT, "")
             .replace(ANSI_BODY, "")
             .replace(ANSI_RESET, "")
@@ -272,7 +273,9 @@ mod tests {
         renderer.colors_enabled = true;
         let mut out = Vec::new();
 
-        renderer.write_styled(&mut out, "<think>drafting</think>feat: add parser\nBody").unwrap();
+        renderer
+            .write_styled(&mut out, "<think>drafting</think>feat: add parser\nBody")
+            .unwrap();
 
         let rendered = String::from_utf8(out).unwrap();
         let plain = strip_known_ansi(&rendered);
@@ -293,7 +296,9 @@ mod tests {
 
         renderer.write_styled(&mut out, "<thi").unwrap();
         renderer.write_styled(&mut out, "nk>plan</th").unwrap();
-        renderer.write_styled(&mut out, "ink>fix: tighten prompt").unwrap();
+        renderer
+            .write_styled(&mut out, "ink>fix: tighten prompt")
+            .unwrap();
 
         let rendered = String::from_utf8(out).unwrap();
         let plain = strip_known_ansi(&rendered);

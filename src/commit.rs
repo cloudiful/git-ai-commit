@@ -55,7 +55,10 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
     eprintln!(
         "{}: {}",
         style_label(colors_enabled, "git-ai-commit"),
-        style_muted(colors_enabled, "generating commit message from staged changes..."),
+        style_muted(
+            colors_enabled,
+            "generating commit message from staged changes..."
+        ),
     );
     let stream_output = if is_interactive_session() {
         StreamOutput::Stdout
@@ -195,10 +198,7 @@ mod tests {
             no_color: false,
             term: Some("xterm-256color".to_string()),
         };
-        let preview = commit_message_preview_with(
-            &env,
-            "fix: tighten prompt",
-        );
+        let preview = commit_message_preview_with(&env, "fix: tighten prompt");
 
         assert!(preview.contains(&style_label(true, "git-ai-commit")));
         assert!(preview.contains(&style_accent(true, ">")));

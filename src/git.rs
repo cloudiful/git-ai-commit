@@ -146,7 +146,10 @@ fn format_redaction_preview(entries: &[RedactionEntry]) -> String {
         preview.push_str(" ");
         preview.push_str(&style_accent(colors_enabled, "<="));
         preview.push(' ');
-        preview.push_str(&style_muted(colors_enabled, &preview_value(&entry.original)));
+        preview.push_str(&style_muted(
+            colors_enabled,
+            &preview_value(&entry.original),
+        ));
         if let Some(display_value) = entry
             .display_value
             .as_ref()
@@ -167,7 +170,10 @@ fn format_redaction_preview(entries: &[RedactionEntry]) -> String {
             style_label(colors_enabled, "git-ai-commit"),
             style_muted(
                 colors_enabled,
-                &format!("... and {} more redacted value(s)", entries.len() - REDACTION_PREVIEW_LIMIT),
+                &format!(
+                    "... and {} more redacted value(s)",
+                    entries.len() - REDACTION_PREVIEW_LIMIT
+                ),
             ),
         ));
     }

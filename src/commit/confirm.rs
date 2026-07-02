@@ -62,9 +62,7 @@ fn commit_confirmation_prompt_with(env: &TerminalUiEnv) -> String {
 #[cfg(test)]
 mod tests {
     use super::{CommitConfirmation, commit_confirmation_prompt_with, parse_commit_confirmation};
-    use crate::terminal_ui::{
-        TerminalUiEnv, style_edit, style_label, style_muted, style_success,
-    };
+    use crate::terminal_ui::{TerminalUiEnv, style_edit, style_label, style_muted, style_success};
 
     #[test]
     fn plain_confirmation_prompt_still_contains_question() {

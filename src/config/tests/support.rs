@@ -1,13 +1,14 @@
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-const CONFIG_ENV_KEYS: [&str; 23] = [
+const CONFIG_ENV_KEYS: [&str; 24] = [
     "GIT_AI_COMMIT_PROVIDER",
     "GIT_AI_COMMIT_API_BASE",
     "GIT_AI_COMMIT_API_KEY",
     "GIT_AI_COMMIT_MODEL",
     "GIT_AI_COMMIT_CONFIRM_COMMIT",
     "GIT_AI_COMMIT_OPEN_EDITOR",
+    "GIT_AI_COMMIT_ENABLE_FALLBACK",
     "GIT_AI_COMMIT_REDACT_SECRETS",
     "GIT_AI_COMMIT_REDACTION_SECRET",
     "GIT_AI_COMMIT_REDACTION_DOMAIN",

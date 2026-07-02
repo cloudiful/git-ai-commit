@@ -302,10 +302,12 @@ async fn execute_responses_request_with_http(
     request: &CreateResponse,
     stream: bool,
 ) -> Result<Response, ApiAttemptError> {
-    let builder = build_responses_request(http_client, cfg, request, stream)
-        .map_err(|message| ApiAttemptError {
-            message,
-            should_fallback: false,
+    let builder =
+        build_responses_request(http_client, cfg, request, stream).map_err(|message| {
+            ApiAttemptError {
+                message,
+                should_fallback: false,
+            }
         })?;
     let response = builder.send().await.map_err(|err| ApiAttemptError {
         message: err.to_string(),
@@ -415,7 +417,10 @@ fn take_next_sse_payload_with_eof(buffer: &mut Vec<u8>) -> Result<Option<String>
     take_next_sse_payload_inner(buffer, true)
 }
 
-fn take_next_sse_payload_inner(buffer: &mut Vec<u8>, flush_eof: bool) -> Result<Option<String>, String> {
+fn take_next_sse_payload_inner(
+    buffer: &mut Vec<u8>,
+    flush_eof: bool,
+) -> Result<Option<String>, String> {
     let Some((event_len, separator_len)) = find_sse_event_boundary(buffer).or_else(|| {
         if flush_eof && !buffer.is_empty() {
             Some((buffer.len(), 0))

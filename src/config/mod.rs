@@ -38,6 +38,7 @@ pub struct Config {
     pub model: String,
     pub confirm_commit: bool,
     pub open_editor: bool,
+    pub enable_fallback: bool,
     pub redact_secrets: bool,
     pub redaction_rules: RedactionRules,
     pub show_timing: bool,
@@ -57,6 +58,7 @@ pub(super) struct FileConfig {
     pub(super) model: Option<String>,
     pub(super) confirm_commit: Option<bool>,
     pub(super) open_editor: Option<bool>,
+    pub(super) enable_fallback: Option<bool>,
     pub(super) redact_secrets: Option<bool>,
     pub(super) redaction_rules: Option<FileRedactionRules>,
     pub(super) show_timing: Option<bool>,
@@ -88,6 +90,7 @@ pub(super) struct RawConfigValues {
     pub(super) model: Option<String>,
     pub(super) confirm_commit: Option<String>,
     pub(super) open_editor: Option<String>,
+    pub(super) enable_fallback: Option<String>,
     pub(super) redact_secrets: Option<String>,
     pub(super) redaction_secret: Option<String>,
     pub(super) redaction_domain: Option<String>,
@@ -147,6 +150,12 @@ pub fn load_partial_config() -> Result<Config, String> {
             "ai.commit.openEditor",
             |values| values.open_editor.as_ref(),
             |cfg| cfg.open_editor,
+            false,
+        )?,
+        enable_fallback: snapshot.bool_value(
+            "ai.commit.enableFallback",
+            |values| values.enable_fallback.as_ref(),
+            |cfg| cfg.enable_fallback,
             false,
         )?,
         redact_secrets: snapshot.bool_value(
@@ -433,6 +442,10 @@ impl Config {
         self.provider == Provider::OpenAiCompatible
             && self.model_context_tokens.is_none()
             && is_openrouter_url(&self.api_base)
+    }
+
+    pub fn should_use_streaming_generation(&self) -> bool {
+        self.provider != Provider::AnthropicCompatible && !self.should_use_anthropic_transport()
     }
 
     pub fn auth_mode_description(&self) -> String {

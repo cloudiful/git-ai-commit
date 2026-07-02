@@ -1,7 +1,7 @@
 use super::{
     ResponseTextAccumulator, append_response_stream_event_text, extract_chat_message,
-    extract_response_text, should_fallback_from_responses,
-    should_fallback_from_responses_message, should_retry_without_stream_message,
+    extract_response_text, should_fallback_from_responses, should_fallback_from_responses_message,
+    should_retry_without_stream_message,
 };
 use crate::openai::{StreamOutput, StreamRenderer};
 use serde_json::json;

@@ -69,10 +69,15 @@ pub(crate) async fn generate_openai_message_with_stream_output(
 ) -> Result<(String, GenerationMetrics), String> {
     let prompt = build_prompt(repo_ctx);
     let started = Instant::now();
-    let mut renderer = StreamRenderer::new(stream_output);
+    let effective_stream_output = if cfg.should_use_streaming_generation() {
+        stream_output
+    } else {
+        StreamOutput::None
+    };
+    let mut renderer = StreamRenderer::new(effective_stream_output);
     let debug_enabled = provider_debug_enabled(debug_provider);
 
-    let message = match request::endpoint_preference(&cfg.api_base) {
+    let message = match endpoint_preference_for_generation(cfg) {
         ApiEndpointPreference::ResponsesOnly => {
             generate_message_via_responses(cfg, &prompt, &mut renderer, debug_provider)
                 .await
@@ -86,7 +91,7 @@ pub(crate) async fn generate_openai_message_with_stream_output(
             match generate_message_via_responses(cfg, &prompt, &mut renderer, debug_provider).await
             {
                 Ok(message) => message,
-                Err(err) if err.should_fallback => {
+                Err(err) if err.should_fallback && cfg.enable_fallback => {
                     if debug_enabled {
                         eprintln!(
                             "git-ai-commit: provider debug: responses failed, falling back to chat/completions: {}",
@@ -116,6 +121,14 @@ pub(crate) async fn generate_openai_message_with_stream_output(
     Ok((message, metrics))
 }
 
+fn endpoint_preference_for_generation(cfg: &Config) -> ApiEndpointPreference {
+    match request::endpoint_preference(&cfg.api_base) {
+        ApiEndpointPreference::Auto if cfg.enable_fallback => ApiEndpointPreference::Auto,
+        ApiEndpointPreference::Auto => ApiEndpointPreference::ResponsesOnly,
+        explicit => explicit,
+    }
+}
+
 pub(crate) fn apply_auth(builder: RequestBuilder, cfg: &Config) -> RequestBuilder {
     if cfg.should_send_bearer_auth() {
         builder.bearer_auth(&cfg.api_key)
@@ -133,10 +146,12 @@ async fn generate_message_via_responses(
     let debug_enabled = provider_debug_enabled(debug_provider);
     let request = build_responses_request(cfg, prompt)?;
 
-    if renderer.enabled() {
+    if cfg.should_use_streaming_generation() {
         match byot::run_responses_stream_once(cfg, &request, renderer, debug_enabled).await {
             Ok(message) => Ok(message),
-            Err(err) if should_retry_without_stream_message(&err.message) => {
+            Err(err)
+                if cfg.enable_fallback && should_retry_without_stream_message(&err.message) =>
+            {
                 if debug_enabled {
                     eprintln!(
                         "git-ai-commit: provider debug: responses stream failed, retrying without stream: {}",
@@ -173,10 +188,10 @@ async fn generate_message_via_chat_completions(
     let debug_enabled = provider_debug_enabled(debug_provider);
     let request = build_chat_request(cfg, prompt)?;
 
-    if renderer.enabled() {
+    if cfg.should_use_streaming_generation() {
         match byot::run_chat_stream_once(cfg, &request, renderer, debug_enabled).await {
             Ok(message) => Ok(message),
-            Err(err) if should_retry_without_stream_message(&err) => {
+            Err(err) if cfg.enable_fallback && should_retry_without_stream_message(&err) => {
                 if debug_enabled {
                     eprintln!(
                         "git-ai-commit: provider debug: chat.completions stream failed, retrying without stream: {}",
@@ -223,4 +238,97 @@ fn build_chat_request(cfg: &Config, prompt: &str) -> Result<CreateChatCompletion
         .max_completion_tokens(MAX_OUTPUT_TOKENS as u32)
         .build()
         .map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::endpoint_preference_for_generation;
+    use crate::config::{Config, Provider, default_redaction_rules};
+    use crate::openai::request::ApiEndpointPreference;
+    use std::time::Duration;
+
+    #[test]
+    fn defaults_auto_endpoint_to_strict_responses_only() {
+        let cfg = sample_config(
+            "https://api.openai.com/v1",
+            false,
+            Provider::OpenAiCompatible,
+        );
+
+        assert_eq!(
+            endpoint_preference_for_generation(&cfg),
+            ApiEndpointPreference::ResponsesOnly
+        );
+    }
+
+    #[test]
+    fn keeps_auto_fallback_only_when_enabled() {
+        let cfg = sample_config(
+            "https://api.openai.com/v1",
+            true,
+            Provider::OpenAiCompatible,
+        );
+
+        assert_eq!(
+            endpoint_preference_for_generation(&cfg),
+            ApiEndpointPreference::Auto
+        );
+    }
+
+    #[test]
+    fn preserves_explicit_chat_endpoint_even_without_fallback() {
+        let cfg = sample_config(
+            "https://api.openai.com/v1/chat/completions",
+            false,
+            Provider::OpenAiCompatible,
+        );
+
+        assert_eq!(
+            endpoint_preference_for_generation(&cfg),
+            ApiEndpointPreference::ChatCompletionsOnly
+        );
+    }
+
+    #[test]
+    fn openai_compatible_defaults_to_streaming_generation() {
+        let cfg = sample_config(
+            "https://api.openai.com/v1",
+            false,
+            Provider::OpenAiCompatible,
+        );
+
+        assert!(cfg.should_use_streaming_generation());
+    }
+
+    #[test]
+    fn anthropic_transport_keeps_non_streaming_generation() {
+        let cfg = sample_config(
+            "https://api.deepseek.com/anthropic",
+            false,
+            Provider::AnthropicCompatible,
+        );
+
+        assert!(!cfg.should_use_streaming_generation());
+    }
+
+    fn sample_config(api_base: &str, enable_fallback: bool, provider: Provider) -> Config {
+        Config {
+            provider,
+            api_base: api_base.to_string(),
+            api_key: "token".to_string(),
+            model: "gpt-4.1-mini".to_string(),
+            confirm_commit: true,
+            open_editor: false,
+            enable_fallback,
+            redact_secrets: true,
+            redaction_rules: default_redaction_rules(),
+            show_timing: true,
+            use_env_proxy: false,
+            timeout: Duration::from_secs(5),
+            max_diff_bytes: 60_000,
+            max_diff_tokens: Some(16_000),
+            max_diff_tokens_explicit: false,
+            model_context_tokens: None,
+        }
+    }
 }
