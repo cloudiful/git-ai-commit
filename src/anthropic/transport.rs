@@ -3,7 +3,6 @@ use crate::message::{sanitize_message, validate_message};
 use crate::openai::{GenerationMetrics, StreamOutput, StreamRenderer};
 use crate::provider_common::{new_http_client, provider_debug_enabled, truncate_debug_body};
 use reqwest::RequestBuilder;
-use std::time::Instant;
 
 use super::request::{
     ANTHROPIC_VERSION, Message, MessagesRequest, disabled_thinking, messages_url,
@@ -21,7 +20,6 @@ pub(crate) async fn generate_anthropic_message_with_stream_output(
     let prompt = crate::openai::build_prompt(repo_ctx);
     let mut renderer = StreamRenderer::new(stream_output);
 
-    let started = Instant::now();
     let request = MessagesRequest {
         model: cfg.model.clone(),
         system: crate::openai::SYSTEM_PROMPT.to_string(),
@@ -110,7 +108,6 @@ pub(crate) async fn generate_anthropic_message_with_stream_output(
     Ok((
         message,
         GenerationMetrics {
-            api_duration: started.elapsed(),
             streamed_render_completed: renderer.completed_render(),
         },
     ))

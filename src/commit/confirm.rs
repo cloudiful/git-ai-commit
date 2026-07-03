@@ -11,9 +11,11 @@ pub(super) enum CommitConfirmation {
     Cancel,
 }
 
-pub(super) fn prompt_for_commit_confirmation() -> Result<CommitConfirmation, String> {
+pub(super) fn prompt_for_commit_confirmation(
+    status: Option<&str>,
+) -> Result<CommitConfirmation, String> {
     loop {
-        eprint!("{}", commit_confirmation_prompt());
+        eprint!("{}", commit_confirmation_prompt(status));
         io::stderr().flush().map_err(|err| err.to_string())?;
 
         let mut line = String::new();
@@ -39,23 +41,37 @@ fn parse_commit_confirmation(input: &str) -> Option<CommitConfirmation> {
     }
 }
 
-fn commit_confirmation_prompt() -> String {
-    commit_confirmation_prompt_with(&current_stderr_ui_env())
+fn commit_confirmation_prompt(status: Option<&str>) -> String {
+    commit_confirmation_prompt_with(&current_stderr_ui_env(), status)
 }
 
-fn commit_confirmation_prompt_with(env: &TerminalUiEnv) -> String {
+fn commit_confirmation_prompt_with(env: &TerminalUiEnv, status: Option<&str>) -> String {
     let colors_enabled = stderr_colors_enabled_with(env);
+    let status = status.filter(|text| !text.trim().is_empty());
+
     if !colors_enabled {
-        return "continue? [y=commit/e=edit/N=cancel] ".to_string();
+        return match status {
+            Some(status) => format!("{status} [y=commit/e=edit/N=cancel] "),
+            None => "continue? [y=commit/e=edit/N=cancel] ".to_string(),
+        };
     }
 
-    format!(
-        "{} [{}/{}/{}] ",
-        style_subject(colors_enabled, "continue?"),
-        style_success(colors_enabled, "y=commit"),
-        style_edit(colors_enabled, "e=edit"),
-        style_muted(colors_enabled, "N=cancel"),
-    )
+    match status {
+        Some(status) => format!(
+            "{} [{}/{}/{}] ",
+            style_success(colors_enabled, status),
+            style_success(colors_enabled, "y=commit"),
+            style_edit(colors_enabled, "e=edit"),
+            style_muted(colors_enabled, "N=cancel"),
+        ),
+        None => format!(
+            "{} [{}/{}/{}] ",
+            style_subject(colors_enabled, "continue?"),
+            style_success(colors_enabled, "y=commit"),
+            style_edit(colors_enabled, "e=edit"),
+            style_muted(colors_enabled, "N=cancel"),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -67,11 +83,14 @@ mod tests {
 
     #[test]
     fn plain_confirmation_prompt_still_contains_question() {
-        let prompt = commit_confirmation_prompt_with(&TerminalUiEnv {
-            stderr_is_terminal: false,
-            no_color: false,
-            term: Some("xterm-256color".to_string()),
-        });
+        let prompt = commit_confirmation_prompt_with(
+            &TerminalUiEnv {
+                stderr_is_terminal: false,
+                no_color: false,
+                term: Some("xterm-256color".to_string()),
+            },
+            None,
+        );
         assert!(prompt.contains("continue?"));
         assert!(prompt.contains("y=commit"));
         assert!(prompt.contains("["));
@@ -84,11 +103,23 @@ mod tests {
             no_color: false,
             term: Some("xterm-256color".to_string()),
         };
-        let prompt = commit_confirmation_prompt_with(&env);
+        let prompt = commit_confirmation_prompt_with(&env, None);
         assert!(prompt.contains(&style_subject(true, "continue?")));
         assert!(prompt.contains(&style_success(true, "y=commit")));
         assert!(prompt.contains(&style_edit(true, "e=edit")));
         assert!(prompt.contains(&style_muted(true, "N=cancel")));
+    }
+
+    #[test]
+    fn colored_confirmation_prompt_can_inline_ready_status() {
+        let env = TerminalUiEnv {
+            stderr_is_terminal: true,
+            no_color: false,
+            term: Some("xterm-256color".to_string()),
+        };
+        let prompt = commit_confirmation_prompt_with(&env, Some("ready 8.67s"));
+        assert!(prompt.contains(&style_success(true, "ready 8.67s")));
+        assert!(!prompt.contains("continue?"));
     }
 
     #[test]
@@ -105,7 +136,7 @@ mod tests {
                 term: Some("dumb".to_string()),
             },
         ] {
-            let prompt = commit_confirmation_prompt_with(&env);
+            let prompt = commit_confirmation_prompt_with(&env, Some("ready 8.67s"));
             assert!(!prompt.contains("\x1b["));
         }
     }

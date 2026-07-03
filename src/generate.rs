@@ -4,7 +4,7 @@ use crate::openai::{
     resolve_model_context_config,
 };
 use crate::prompt::load_config_for_interactive_use;
-use crate::terminal_ui::{stderr_colors_enabled, style_label, style_muted, style_success};
+use crate::terminal_ui::{stderr_colors_enabled, style_label, style_muted};
 use std::io::IsTerminal;
 use std::time::{Duration, Instant};
 
@@ -22,29 +22,34 @@ pub async fn run_generate() -> Result<(), String> {
     if !metrics.streamed_render_completed {
         println!("{message}");
     }
-    log_timing(&cfg, "generate", started, metrics);
+    log_timing(&cfg, started, metrics);
     Ok(())
 }
 
-pub fn log_timing(
-    cfg: &crate::config::Config,
-    mode: &str,
-    started_at: Instant,
-    metrics: GenerationMetrics,
-) {
-    if !cfg.show_timing {
+pub fn log_timing(cfg: &crate::config::Config, started_at: Instant, metrics: GenerationMetrics) {
+    let Some(summary) = timing_summary(cfg, started_at, metrics) else {
         return;
-    }
+    };
 
     let colors_enabled = stderr_colors_enabled();
-    let total = format_compact_duration(started_at.elapsed());
-    let api = format_compact_duration(metrics.api_duration);
     eprintln!(
-        "{}: {} {}",
+        "{}: {}",
         style_label(colors_enabled, "git-ai-commit"),
-        style_success(colors_enabled, &format!("{mode} ready")),
-        style_muted(colors_enabled, &format!("in {total} (ai {api})"),),
+        style_muted(colors_enabled, &summary),
     );
+}
+
+pub fn timing_summary(
+    cfg: &crate::config::Config,
+    started_at: Instant,
+    _metrics: GenerationMetrics,
+) -> Option<String> {
+    if !cfg.show_timing {
+        return None;
+    }
+
+    let total = format_compact_duration(started_at.elapsed());
+    Some(format!("ready {total}"))
 }
 
 fn format_compact_duration(duration: Duration) -> String {

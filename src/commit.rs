@@ -2,7 +2,7 @@ mod args;
 mod confirm;
 mod doctor;
 
-use crate::generate::log_timing;
+use crate::generate::{log_timing, timing_summary};
 use crate::git::{collect_repo_context, run_git_interactive};
 use crate::openai::{
     StreamOutput, generate_message_with_stream_output, resolve_model_context_config,
@@ -73,14 +73,14 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
     };
 
     let mut message_file = write_commit_message_temp_file(&message)?;
-    log_timing(&cfg, "commit", started, metrics);
+    let timing_summary = timing_summary(&cfg, started, metrics);
     if !metrics.streamed_render_completed {
         eprint!("{}", commit_message_preview(&message));
     }
 
     let mut open_editor = cfg.open_editor;
     if is_interactive_session() && parsed_args.confirm_override.unwrap_or(cfg.confirm_commit) {
-        match prompt_for_commit_confirmation()? {
+        match prompt_for_commit_confirmation(timing_summary.as_deref())? {
             CommitConfirmation::Proceed => {}
             CommitConfirmation::Edit => open_editor = true,
             CommitConfirmation::Cancel => {
@@ -88,6 +88,8 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
                 return Ok(());
             }
         }
+    } else {
+        log_timing(&cfg, started, metrics);
     }
 
     let commit_args = build_ai_commit_args(

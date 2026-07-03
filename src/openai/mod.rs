@@ -18,7 +18,6 @@ use async_openai::types::chat::{
 };
 use async_openai::types::responses::{CreateResponse, CreateResponseArgs, InputParam};
 use reqwest::RequestBuilder;
-use std::time::{Duration, Instant};
 
 pub(crate) use self::request::models_url;
 pub(crate) use self::request::{
@@ -31,7 +30,6 @@ use response::should_retry_without_stream_message;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GenerationMetrics {
-    pub api_duration: Duration,
     pub streamed_render_completed: bool,
 }
 
@@ -72,7 +70,6 @@ pub(crate) async fn generate_openai_message_with_stream_output(
     debug_provider: bool,
 ) -> Result<(String, GenerationMetrics), String> {
     let prompt = build_prompt(repo_ctx);
-    let started = Instant::now();
     let effective_stream_output = if cfg.should_use_streaming_generation() {
         stream_output
     } else {
@@ -124,7 +121,6 @@ pub(crate) async fn generate_openai_message_with_stream_output(
 
     renderer.finish().map_err(|err| err.to_string())?;
     let metrics = GenerationMetrics {
-        api_duration: started.elapsed(),
         streamed_render_completed: renderer.completed_render(),
     };
     validate_message(&message)?;
