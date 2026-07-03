@@ -2,6 +2,7 @@ use super::StreamOutput;
 use super::stream_palette::{StreamPalette, StreamRole};
 use super::thinking_status::ThinkingStatus;
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 pub(crate) struct StreamRenderer {
     output: StreamOutput,
@@ -12,21 +13,25 @@ pub(crate) struct StreamRenderer {
     in_subject_line: bool,
     in_thinking: bool,
     pending_tag: String,
+    output_lock: Arc<Mutex<()>>,
     thinking_status: ThinkingStatus,
 }
 
 impl StreamRenderer {
     pub(crate) fn new(output: StreamOutput) -> Self {
+        let palette = StreamPalette::detect(output);
+        let output_lock = Arc::new(Mutex::new(()));
         Self {
             output,
             started: false,
             completed: false,
             rendered_message: false,
-            palette: StreamPalette::detect(output),
+            palette,
             in_subject_line: true,
             in_thinking: false,
             pending_tag: String::new(),
-            thinking_status: ThinkingStatus::default(),
+            output_lock: Arc::clone(&output_lock),
+            thinking_status: ThinkingStatus::new(output_lock, palette),
         }
     }
 
@@ -48,6 +53,10 @@ impl StreamRenderer {
 
         match self.output {
             StreamOutput::Stdout => {
+                let output_lock = Arc::clone(&self.output_lock);
+                let _guard = output_lock
+                    .lock()
+                    .map_err(|_| std::io::Error::other("stdout lock poisoned"))?;
                 let mut stdout = std::io::stdout().lock();
                 self.write_styled(&mut stdout, text)?;
                 stdout.flush()
@@ -66,8 +75,7 @@ impl StreamRenderer {
             self.started = true;
         }
 
-        self.thinking_status.push_text(text);
-        self.redraw_thinking_status()
+        self.thinking_status.push_text(text)
     }
 
     pub(crate) fn show_thinking_status(&mut self, text: &str) -> std::io::Result<()> {
@@ -80,8 +88,7 @@ impl StreamRenderer {
             self.started = true;
         }
 
-        self.thinking_status.show_placeholder(text);
-        self.redraw_thinking_status()
+        self.thinking_status.show_placeholder(text)
     }
 
     pub(crate) fn finish(&mut self) -> std::io::Result<()> {
@@ -91,11 +98,17 @@ impl StreamRenderer {
 
         match self.output {
             StreamOutput::Stdout => {
-                let mut stdout = std::io::stdout().lock();
-                self.thinking_status.clear(&mut stdout)?;
-                self.palette.write_reset(&mut stdout)?;
-                writeln!(stdout)?;
-                stdout.flush()?;
+                self.thinking_status.stop()?;
+                if self.rendered_message {
+                    let _guard = self
+                        .output_lock
+                        .lock()
+                        .map_err(|_| std::io::Error::other("stdout lock poisoned"))?;
+                    let mut stdout = std::io::stdout().lock();
+                    self.palette.write_reset(&mut stdout)?;
+                    writeln!(stdout)?;
+                    stdout.flush()?;
+                }
             }
             StreamOutput::None => {}
         }
@@ -172,25 +185,11 @@ impl StreamRenderer {
         Ok(())
     }
 
-    fn redraw_thinking_status(&mut self) -> std::io::Result<()> {
-        match self.output {
-            StreamOutput::Stdout => {
-                let mut stdout = std::io::stdout().lock();
-                self.thinking_status.render(&mut stdout, self.palette)?;
-                stdout.flush()
-            }
-            StreamOutput::None => Ok(()),
-        }
-    }
-
     fn clear_thinking_status(&mut self) -> std::io::Result<()> {
-        match self.output {
-            StreamOutput::Stdout => {
-                let mut stdout = std::io::stdout().lock();
-                self.thinking_status.clear(&mut stdout)?;
-                stdout.flush()
-            }
-            StreamOutput::None => Ok(()),
+        if matches!(self.output, StreamOutput::Stdout) {
+            self.thinking_status.stop()
+        } else {
+            Ok(())
         }
     }
 

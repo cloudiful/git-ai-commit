@@ -156,4 +156,4 @@ Streaming transport failures now include read-progress context such as chunk cou
 
 OpenAI-compatible `responses` requests now default to `reasoning.effort = "low"` unless the request body already specifies a `reasoning` object.
 
-When a `responses` stream emits `reasoning_summary_text` deltas, `git-ai-commit` now shows a dim Unicode spinner with a soft animated gradient thinking status line in the terminal while keeping them out of the final commit message. On true-color terminals, the streamed subject and body also use a softer same-family palette instead of the plain default body white.
+When a `responses` stream emits `reasoning_summary_text` deltas, `git-ai-commit` now shows a dim Unicode spinner with a soft animated gradient thinking status line in the terminal while keeping them out of the final commit message. The thinking text stays within a fixed-width window and scrolls as it updates. On true-color terminals, the streamed subject and body also use a softer same-family palette instead of the plain default body white.
