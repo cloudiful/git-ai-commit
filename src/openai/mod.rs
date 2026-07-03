@@ -163,8 +163,8 @@ async fn generate_message_via_responses(
                         "git-ai-commit: provider debug: responses stream failed, retrying without stream: {}",
                         err.message
                     );
-                    byot::diagnose_raw_responses_stream(cfg, &request).await;
                 }
+                byot::diagnose_raw_responses_stream(cfg, &request).await;
                 match byot::run_responses_non_stream_once(cfg, &request, debug_enabled).await {
                     Ok(message) => Ok(message),
                     Err(err) => Err(ApiAttemptError {

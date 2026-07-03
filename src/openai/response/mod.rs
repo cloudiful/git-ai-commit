@@ -1,5 +1,11 @@
 #[cfg(test)]
+mod extract_tests;
+#[cfg(test)]
+mod stream_event_tests;
+#[cfg(test)]
 mod tests;
+
+mod extract;
 
 use crate::message::sanitize_message;
 use crate::openai::StreamRenderer;
@@ -13,11 +19,7 @@ pub(super) fn extract_response_text(
 ) -> Result<String, String> {
     log_response_payload("responses", &response, debug_enabled);
 
-    let message = response
-        .get("output_text")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| extract_response_output_text(&response))
+    let message = extract::extract_response_text_value(&response)
         .map(|text| sanitize_message(&text))
         .filter(|text| !text.is_empty());
 
@@ -147,6 +149,18 @@ pub(super) fn append_response_stream_event_text(
             )?;
             Ok(None)
         }
+        Some("response.content_part.added") => {
+            accumulator.push_output_text_if_missing_from_value(
+                required_str(event, "item_id")?,
+                required_u32(event, "output_index")?,
+                required_u32(event, "content_index")?,
+                event
+                    .get("part")
+                    .ok_or_else(|| "responses stream event missing part".to_string())?,
+                renderer,
+            )?;
+            Ok(None)
+        }
         Some("response.content_part.done") => {
             accumulator.push_output_text_if_missing_from_value(
                 required_str(event, "item_id")?,
@@ -155,6 +169,16 @@ pub(super) fn append_response_stream_event_text(
                 event
                     .get("part")
                     .ok_or_else(|| "responses stream event missing part".to_string())?,
+                renderer,
+            )?;
+            Ok(None)
+        }
+        Some("response.output_item.added") => {
+            accumulator.push_output_item_if_missing_from_value(
+                required_u32(event, "output_index")?,
+                event
+                    .get("item")
+                    .ok_or_else(|| "responses stream event missing item".to_string())?,
                 renderer,
             )?;
             Ok(None)
@@ -179,6 +203,12 @@ pub(super) fn append_response_stream_event_text(
             Ok(None)
         }
         Some("response.reasoning_summary_text.delta") => {
+            renderer
+                .push_thinking(required_str(event, "delta")?)
+                .map_err(|err| err.to_string())?;
+            Ok(None)
+        }
+        Some("response.reasoning_text.delta") => {
             renderer
                 .push_thinking(required_str(event, "delta")?)
                 .map_err(|err| err.to_string())?;
@@ -452,30 +482,6 @@ fn required_u32(value: &Value, key: &str) -> Result<u32, String> {
         .and_then(Value::as_u64)
         .and_then(|n| u32::try_from(n).ok())
         .ok_or_else(|| format!("responses stream event missing integer field {key}"))
-}
-
-fn extract_response_output_text(response: &Value) -> Option<String> {
-    let output = response.get("output")?.as_array()?;
-    let mut out = String::new();
-
-    for item in output {
-        if item.get("type").and_then(Value::as_str) != Some("message") {
-            continue;
-        }
-        let Some(parts) = item.get("content").and_then(Value::as_array) else {
-            continue;
-        };
-        for part in parts {
-            if part.get("type").and_then(Value::as_str) != Some("output_text") {
-                continue;
-            }
-            if let Some(text) = part.get("text").and_then(Value::as_str) {
-                out.push_str(text);
-            }
-        }
-    }
-
-    if out.is_empty() { None } else { Some(out) }
 }
 
 fn value_as_text(value: &Value) -> Option<String> {
