@@ -1,4 +1,8 @@
-use super::{ApiAttemptError, StreamRenderer, apply_auth, request, response};
+use super::{
+    ApiAttemptError, StreamRenderer, apply_auth,
+    provider_defaults::{EndpointKind, apply_provider_body_defaults},
+    request, response, sse,
+};
 use crate::config::Config;
 use crate::provider_common::{new_http_client, new_streaming_http_client, truncate_debug_body};
 use async_openai::types::chat::CreateChatCompletionRequest;
@@ -179,14 +183,16 @@ async fn collect_responses_stream(
 ) -> Result<String, ApiAttemptError> {
     let mut accumulator = response::ResponseTextAccumulator::default();
     let mut error_message = None;
+    let mut last_event_summary = None;
 
-    collect_sse_events(response, |payload| {
+    sse::collect_sse_events(response, |payload| {
         if payload == "[DONE]" {
             return Ok(false);
         }
 
         let event: Value = serde_json::from_str(payload)
             .map_err(|err| format!("stream failed: invalid responses event JSON: {err}"))?;
+        last_event_summary = Some(response::summarize_stream_event(&event));
         if let Some(message) = response::append_response_stream_event_text(
             &event,
             renderer,
@@ -201,7 +207,7 @@ async fn collect_responses_stream(
     .await
     .map_err(|message| ApiAttemptError {
         should_fallback: false,
-        message,
+        message: append_last_event_context(message, last_event_summary.as_deref()),
     })?;
 
     if !accumulator.content().trim().is_empty() {
@@ -223,14 +229,16 @@ async fn collect_chat_stream(
     debug_enabled: bool,
 ) -> Result<String, String> {
     let mut content = String::new();
+    let mut last_event_summary = None;
 
-    collect_sse_events(response, |payload| {
+    sse::collect_sse_events(response, |payload| {
         if payload == "[DONE]" {
             return Ok(false);
         }
 
         let event: Value = serde_json::from_str(payload)
             .map_err(|err| format!("stream failed: invalid chat event JSON: {err}"))?;
+        last_event_summary = Some(response::summarize_stream_event(&event));
         if debug_enabled {
             response::log_json_payload("chat.completions.stream.event", &event, true);
         }
@@ -246,40 +254,14 @@ async fn collect_chat_stream(
 
         Ok(true)
     })
-    .await?;
+    .await
+    .map_err(|message| append_last_event_context(message, last_event_summary.as_deref()))?;
 
     let sanitized = crate::message::sanitize_message(&content);
     if sanitized.is_empty() {
         return Err("chat completion returned no stream chunks".to_string());
     }
     Ok(sanitized)
-}
-
-async fn collect_sse_events(
-    response: Response,
-    mut on_payload: impl FnMut(&str) -> Result<bool, String>,
-) -> Result<(), String> {
-    let mut byte_stream = response.bytes_stream();
-    let mut buffer = Vec::new();
-
-    while let Some(chunk) = byte_stream.next().await {
-        let chunk = chunk.map_err(|err| format!("stream failed: {err}"))?;
-        buffer.extend_from_slice(&chunk);
-
-        while let Some(payload) = take_next_sse_payload(&mut buffer)? {
-            if !on_payload(&payload)? {
-                return Ok(());
-            }
-        }
-    }
-
-    while let Some(payload) = take_next_sse_payload_with_eof(&mut buffer)? {
-        if !on_payload(&payload)? {
-            return Ok(());
-        }
-    }
-
-    Ok(())
 }
 
 async fn decode_json_response(
@@ -375,7 +357,10 @@ fn build_responses_request(
         builder = builder.header(ACCEPT, "text/event-stream");
     }
 
-    Ok(apply_auth(builder_json(builder, request, stream)?, cfg))
+    Ok(apply_auth(
+        builder_json(cfg, builder, request, stream, EndpointKind::Responses)?,
+        cfg,
+    ))
 }
 
 fn build_chat_request(
@@ -394,75 +379,25 @@ fn build_chat_request(
         builder = builder.header(ACCEPT, "text/event-stream");
     }
 
-    Ok(apply_auth(builder_json(builder, request, stream)?, cfg))
+    Ok(apply_auth(
+        builder_json(cfg, builder, request, stream, EndpointKind::ChatCompletions)?,
+        cfg,
+    ))
 }
 
 fn builder_json<T: Serialize>(
+    cfg: &Config,
     builder: RequestBuilder,
     request: &T,
     stream: bool,
+    endpoint_kind: EndpointKind,
 ) -> Result<RequestBuilder, String> {
     let mut body = serde_json::to_value(request).map_err(|err| err.to_string())?;
     if stream {
         body["stream"] = Value::Bool(true);
     }
+    apply_provider_body_defaults(cfg, endpoint_kind, &mut body);
     Ok(builder.json(&body))
-}
-
-fn take_next_sse_payload(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
-    take_next_sse_payload_inner(buffer, false)
-}
-
-fn take_next_sse_payload_with_eof(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
-    take_next_sse_payload_inner(buffer, true)
-}
-
-fn take_next_sse_payload_inner(
-    buffer: &mut Vec<u8>,
-    flush_eof: bool,
-) -> Result<Option<String>, String> {
-    let Some((event_len, separator_len)) = find_sse_event_boundary(buffer).or_else(|| {
-        if flush_eof && !buffer.is_empty() {
-            Some((buffer.len(), 0))
-        } else {
-            None
-        }
-    }) else {
-        return Ok(None);
-    };
-
-    let event_bytes = buffer[..event_len].to_vec();
-    buffer.drain(..event_len + separator_len);
-    let event = std::str::from_utf8(&event_bytes)
-        .map_err(|err| format!("stream failed: invalid utf8 SSE payload: {err}"))?;
-
-    let mut data_lines = Vec::new();
-    for line in event.lines() {
-        let line = line.trim_end_matches('\r');
-        if let Some(payload) = line.strip_prefix("data:") {
-            data_lines.push(payload.trim_start().to_string());
-        }
-    }
-
-    if data_lines.is_empty() {
-        return Ok(Some(String::new()));
-    }
-
-    Ok(Some(data_lines.join("\n")))
-}
-
-fn find_sse_event_boundary(buffer: &[u8]) -> Option<(usize, usize)> {
-    let mut idx = 0usize;
-    while idx < buffer.len() {
-        if idx + 3 < buffer.len() && &buffer[idx..idx + 4] == b"\r\n\r\n" {
-            return Some((idx, 4));
-        }
-        if idx + 1 < buffer.len() && &buffer[idx..idx + 2] == b"\n\n" {
-            return Some((idx, 2));
-        }
-        idx += 1;
-    }
-    None
 }
 
 fn format_headers(headers: &HeaderMap) -> String {
@@ -499,4 +434,11 @@ fn format_hex(bytes: &[u8]) -> String {
         out.push_str(&format!("{:02x}", byte));
     }
     out
+}
+
+fn append_last_event_context(message: String, last_event_summary: Option<&str>) -> String {
+    match last_event_summary {
+        Some(summary) => format!("{message}; last parsed event: {summary}"),
+        None => message,
+    }
 }

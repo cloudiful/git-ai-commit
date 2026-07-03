@@ -151,3 +151,7 @@ git ai-commit --debug-provider
 ```
 
 If a provider completes `responses` with output tokens but no visible text, `git-ai-commit` treats that as an error by default. Enable `ai.commit.enableFallback` if you want automatic retry and endpoint fallback behavior.
+
+Streaming transport failures now include read-progress context such as chunk count, byte count, SSE event count, the last parsed event, and a short tail preview from the response body.
+
+OpenAI-compatible `responses` requests now default to `reasoning.effort = "minimal"` unless the request body already specifies a `reasoning` object.

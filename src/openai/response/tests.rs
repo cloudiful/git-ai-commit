@@ -1,7 +1,7 @@
 use super::{
     ResponseTextAccumulator, append_response_stream_event_text, extract_chat_message,
     extract_response_text, should_fallback_from_responses, should_fallback_from_responses_message,
-    should_retry_without_stream_message,
+    should_retry_without_stream_message, summarize_stream_event,
 };
 use crate::openai::{StreamOutput, StreamRenderer};
 use serde_json::json;
@@ -191,5 +191,21 @@ fn backfills_done_only_stream_parts_once_in_order() {
     assert_eq!(
         accumulator.content(),
         "refactor: rewrite provider path\n\nPrefer responses first and retry chat as fallback."
+    );
+}
+
+#[test]
+fn summarizes_stream_event_with_key_identifiers() {
+    let summary = summarize_stream_event(&json!({
+        "type": "response.reasoning_text.delta",
+        "item_id": "rs_123",
+        "sequence_number": 42,
+        "output_index": 0,
+        "content_index": 1
+    }));
+
+    assert_eq!(
+        summary,
+        "type=response.reasoning_text.delta item_id=rs_123 sequence_number=42 output_index=0 content_index=1"
     );
 }

@@ -174,6 +174,32 @@ pub(super) fn append_response_stream_event_text(
     }
 }
 
+pub(super) fn summarize_stream_event(event: &Value) -> String {
+    let mut parts = Vec::new();
+
+    if let Some(event_type) = event.get("type").and_then(Value::as_str) {
+        parts.push(format!("type={event_type}"));
+    }
+    if let Some(item_id) = event.get("item_id").and_then(Value::as_str) {
+        parts.push(format!("item_id={item_id}"));
+    }
+    if let Some(sequence_number) = event.get("sequence_number").and_then(Value::as_u64) {
+        parts.push(format!("sequence_number={sequence_number}"));
+    }
+    if let Some(output_index) = event.get("output_index").and_then(Value::as_u64) {
+        parts.push(format!("output_index={output_index}"));
+    }
+    if let Some(content_index) = event.get("content_index").and_then(Value::as_u64) {
+        parts.push(format!("content_index={content_index}"));
+    }
+
+    if parts.is_empty() {
+        truncate_debug_body(&event.to_string())
+    } else {
+        parts.join(" ")
+    }
+}
+
 pub(super) fn extract_error_message(event: &Value) -> Option<String> {
     event
         .get("message")
