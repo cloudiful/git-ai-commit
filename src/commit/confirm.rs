@@ -1,6 +1,6 @@
 use crate::terminal_ui::{
-    TerminalUiEnv, current_stderr_ui_env, stderr_colors_enabled_with, style_edit, style_label,
-    style_muted, style_success,
+    TerminalUiEnv, current_stderr_ui_env, stderr_colors_enabled_with, style_edit, style_muted,
+    style_subject, style_success,
 };
 use std::io::{self, Write};
 
@@ -46,13 +46,12 @@ fn commit_confirmation_prompt() -> String {
 fn commit_confirmation_prompt_with(env: &TerminalUiEnv) -> String {
     let colors_enabled = stderr_colors_enabled_with(env);
     if !colors_enabled {
-        return "git-ai-commit: continue? [y=commit/e=edit/N=cancel] ".to_string();
+        return "continue? [y=commit/e=edit/N=cancel] ".to_string();
     }
 
     format!(
-        "{}: {} [{}/{}/{}] ",
-        style_label(colors_enabled, "git-ai-commit"),
-        style_muted(colors_enabled, "continue?"),
+        "{} [{}/{}/{}] ",
+        style_subject(colors_enabled, "continue?"),
         style_success(colors_enabled, "y=commit"),
         style_edit(colors_enabled, "e=edit"),
         style_muted(colors_enabled, "N=cancel"),
@@ -62,7 +61,9 @@ fn commit_confirmation_prompt_with(env: &TerminalUiEnv) -> String {
 #[cfg(test)]
 mod tests {
     use super::{CommitConfirmation, commit_confirmation_prompt_with, parse_commit_confirmation};
-    use crate::terminal_ui::{TerminalUiEnv, style_edit, style_label, style_muted, style_success};
+    use crate::terminal_ui::{
+        TerminalUiEnv, style_edit, style_muted, style_subject, style_success,
+    };
 
     #[test]
     fn plain_confirmation_prompt_still_contains_question() {
@@ -84,7 +85,7 @@ mod tests {
             term: Some("xterm-256color".to_string()),
         };
         let prompt = commit_confirmation_prompt_with(&env);
-        assert!(prompt.contains(&style_label(true, "git-ai-commit")));
+        assert!(prompt.contains(&style_subject(true, "continue?")));
         assert!(prompt.contains(&style_success(true, "y=commit")));
         assert!(prompt.contains(&style_edit(true, "e=edit")));
         assert!(prompt.contains(&style_muted(true, "N=cancel")));
