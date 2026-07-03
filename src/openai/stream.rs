@@ -6,6 +6,8 @@ const ANSI_RESET: &str = "\x1b[0m";
 const ANSI_SUBJECT: &str = "\x1b[1;36m";
 const ANSI_BODY: &str = "\x1b[39m";
 const ANSI_THINKING: &str = "\x1b[90m";
+const ANSI_CLEAR_LINE: &str = "\x1b[2K";
+const THINKING_SPINNER_FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
 
 pub(crate) struct StreamRenderer {
     output: StreamOutput,
@@ -15,6 +17,9 @@ pub(crate) struct StreamRenderer {
     in_subject_line: bool,
     in_thinking: bool,
     pending_tag: String,
+    thinking_status_active: bool,
+    thinking_status_text: String,
+    thinking_status_frame: usize,
 }
 
 impl StreamRenderer {
@@ -27,6 +32,9 @@ impl StreamRenderer {
             in_subject_line: true,
             in_thinking: false,
             pending_tag: String::new(),
+            thinking_status_active: false,
+            thinking_status_text: String::new(),
+            thinking_status_frame: 0,
         }
     }
 
@@ -40,15 +48,11 @@ impl StreamRenderer {
         }
 
         if !self.started {
-            match self.output {
-                StreamOutput::Stdout => {
-                    let mut stdout = std::io::stdout().lock();
-                    stdout.flush()?;
-                }
-                StreamOutput::None => {}
-            }
+            self.start_output()?;
             self.started = true;
         }
+
+        self.clear_thinking_status()?;
 
         match self.output {
             StreamOutput::Stdout => {
@@ -60,6 +64,21 @@ impl StreamRenderer {
         }
     }
 
+    pub(crate) fn push_thinking(&mut self, text: &str) -> std::io::Result<()> {
+        if text.is_empty() || !self.enabled() {
+            return Ok(());
+        }
+
+        if !self.started {
+            self.start_output()?;
+            self.started = true;
+        }
+
+        self.thinking_status_active = true;
+        self.thinking_status_text.push_str(text);
+        self.redraw_thinking_status()
+    }
+
     pub(crate) fn finish(&mut self) -> std::io::Result<()> {
         if !self.started || !self.enabled() {
             return Ok(());
@@ -68,6 +87,7 @@ impl StreamRenderer {
         match self.output {
             StreamOutput::Stdout => {
                 let mut stdout = std::io::stdout().lock();
+                self.write_clear_thinking_status(&mut stdout)?;
                 if self.colors_enabled {
                     write!(stdout, "{ANSI_RESET}")?;
                 }
@@ -81,15 +101,22 @@ impl StreamRenderer {
         self.in_subject_line = true;
         self.in_thinking = false;
         self.pending_tag.clear();
+        self.thinking_status_active = false;
+        self.thinking_status_text.clear();
+        self.thinking_status_frame = 0;
         Ok(())
     }
 
     pub(crate) fn reset(&mut self) {
+        let _ = self.clear_thinking_status();
         self.started = false;
         self.completed = false;
         self.in_subject_line = true;
         self.in_thinking = false;
         self.pending_tag.clear();
+        self.thinking_status_active = false;
+        self.thinking_status_text.clear();
+        self.thinking_status_frame = 0;
     }
 
     pub(crate) fn completed_render(&self) -> bool {
@@ -144,6 +171,59 @@ impl StreamRenderer {
         Ok(())
     }
 
+    fn redraw_thinking_status(&mut self) -> std::io::Result<()> {
+        match self.output {
+            StreamOutput::Stdout => {
+                let mut stdout = std::io::stdout().lock();
+                self.write_thinking_status(&mut stdout)?;
+                stdout.flush()
+            }
+            StreamOutput::None => Ok(()),
+        }
+    }
+
+    fn clear_thinking_status(&mut self) -> std::io::Result<()> {
+        match self.output {
+            StreamOutput::Stdout => {
+                let mut stdout = std::io::stdout().lock();
+                self.write_clear_thinking_status(&mut stdout)?;
+                stdout.flush()
+            }
+            StreamOutput::None => Ok(()),
+        }
+    }
+
+    fn write_thinking_status<W: Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
+        self.write_clear_thinking_status(writer)?;
+        let frame =
+            THINKING_SPINNER_FRAMES[self.thinking_status_frame % THINKING_SPINNER_FRAMES.len()];
+        self.thinking_status_frame = self.thinking_status_frame.wrapping_add(1);
+        let status_text = thinking_status_text(&self.thinking_status_text);
+        self.thinking_status_active = true;
+
+        if self.colors_enabled {
+            write!(writer, "{ANSI_THINKING}")?;
+        }
+        write!(writer, "{frame} thinking")?;
+        if !status_text.is_empty() {
+            write!(writer, ": {status_text}")?;
+        }
+        if self.colors_enabled {
+            write!(writer, "{ANSI_RESET}")?;
+        }
+        Ok(())
+    }
+
+    fn write_clear_thinking_status<W: Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
+        if !self.thinking_status_active {
+            return Ok(());
+        }
+
+        write!(writer, "\r{ANSI_CLEAR_LINE}\r")?;
+        self.thinking_status_active = false;
+        Ok(())
+    }
+
     fn current_style(&self) -> &'static str {
         if self.in_thinking {
             ANSI_THINKING
@@ -172,6 +252,16 @@ impl StreamRenderer {
 
         write!(writer, "{ch}")
     }
+
+    fn start_output(&self) -> std::io::Result<()> {
+        match self.output {
+            StreamOutput::Stdout => {
+                let mut stdout = std::io::stdout().lock();
+                stdout.flush()
+            }
+            StreamOutput::None => Ok(()),
+        }
+    }
 }
 
 fn stream_colors_enabled(output: StreamOutput) -> bool {
@@ -190,9 +280,23 @@ fn stream_colors_enabled(output: StreamOutput) -> bool {
     true
 }
 
+fn thinking_status_text(text: &str) -> String {
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = compact.chars();
+    let preview = chars.by_ref().take(80).collect::<String>();
+    if chars.next().is_some() {
+        format!("{preview}...")
+    } else {
+        preview
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ANSI_BODY, ANSI_RESET, ANSI_SUBJECT, ANSI_THINKING, StreamOutput, StreamRenderer};
+    use super::{
+        ANSI_BODY, ANSI_CLEAR_LINE, ANSI_RESET, ANSI_SUBJECT, ANSI_THINKING, StreamOutput,
+        StreamRenderer, thinking_status_text,
+    };
     use std::io::BufRead;
     use std::io::Cursor;
 
@@ -306,5 +410,32 @@ mod tests {
         assert!(rendered.contains(ANSI_SUBJECT));
         assert!(plain.contains("plan"));
         assert!(plain.contains("fix: tighten prompt"));
+    }
+
+    #[test]
+    fn thinking_status_text_compacts_and_truncates() {
+        let status = thinking_status_text(
+            "considering   staged\n\nchanges and summarizing the diff in a compact way for terminal display",
+        );
+
+        assert!(status.starts_with("considering staged changes"));
+        assert!(status.ends_with("..."));
+    }
+
+    #[test]
+    fn write_thinking_status_renders_spinner_line() {
+        let mut renderer = StreamRenderer::new(StreamOutput::Stdout);
+        renderer.colors_enabled = true;
+        renderer.thinking_status_active = true;
+        renderer.thinking_status_text = "considering diff".to_string();
+        let mut out = Vec::new();
+
+        renderer.write_thinking_status(&mut out).unwrap();
+
+        let rendered = String::from_utf8(out).unwrap();
+        let plain = strip_known_ansi(&rendered);
+        assert!(rendered.contains(ANSI_CLEAR_LINE));
+        assert!(rendered.contains(ANSI_THINKING));
+        assert!(plain.contains("| thinking: considering diff"));
     }
 }

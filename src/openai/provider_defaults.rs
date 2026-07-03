@@ -13,7 +13,7 @@ pub(super) fn apply_provider_body_defaults(
     body: &mut Value,
 ) {
     if endpoint_kind == EndpointKind::Responses && body.get("reasoning").is_none() {
-        body["reasoning"] = json!({ "effort": "minimal" });
+        body["reasoning"] = json!({ "effort": "low" });
     }
 }
 
@@ -34,7 +34,7 @@ mod tests {
 
         apply_provider_body_defaults(&cfg, EndpointKind::Responses, &mut body);
 
-        assert_eq!(body["reasoning"], json!({ "effort": "minimal" }));
+        assert_eq!(body["reasoning"], json!({ "effort": "low" }));
     }
 
     #[test]

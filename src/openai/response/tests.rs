@@ -195,17 +195,46 @@ fn backfills_done_only_stream_parts_once_in_order() {
 }
 
 #[test]
+fn reasoning_deltas_do_not_pollute_final_message_content() {
+    let mut renderer = StreamRenderer::new(StreamOutput::None);
+    let mut accumulator = ResponseTextAccumulator::default();
+
+    for event in [
+        json!({
+            "type": "response.reasoning_summary_text.delta",
+            "item_id": "rs_1",
+            "output_index": 0,
+            "summary_index": 0,
+            "delta": "considering the staged diff"
+        }),
+        json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_1",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": "feat: add parser"
+        }),
+    ] {
+        let result =
+            append_response_stream_event_text(&event, &mut renderer, &mut accumulator, false);
+        assert_eq!(result.unwrap(), None);
+    }
+
+    assert_eq!(accumulator.content(), "feat: add parser");
+}
+
+#[test]
 fn summarizes_stream_event_with_key_identifiers() {
     let summary = summarize_stream_event(&json!({
-        "type": "response.reasoning_text.delta",
+        "type": "response.reasoning_summary_text.delta",
         "item_id": "rs_123",
         "sequence_number": 42,
         "output_index": 0,
-        "content_index": 1
+        "summary_index": 1
     }));
 
     assert_eq!(
         summary,
-        "type=response.reasoning_text.delta item_id=rs_123 sequence_number=42 output_index=0 content_index=1"
+        "type=response.reasoning_summary_text.delta item_id=rs_123 sequence_number=42 output_index=0 summary_index=1"
     );
 }

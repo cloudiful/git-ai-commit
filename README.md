@@ -154,4 +154,6 @@ If a provider completes `responses` with output tokens but no visible text, `git
 
 Streaming transport failures now include read-progress context such as chunk count, byte count, SSE event count, the last parsed event, and a short tail preview from the response body.
 
-OpenAI-compatible `responses` requests now default to `reasoning.effort = "minimal"` unless the request body already specifies a `reasoning` object.
+OpenAI-compatible `responses` requests now default to `reasoning.effort = "low"` unless the request body already specifies a `reasoning` object.
+
+When a `responses` stream emits `reasoning_summary_text` deltas, `git-ai-commit` now shows a dim animated thinking status line in the terminal while keeping them out of the final commit message.

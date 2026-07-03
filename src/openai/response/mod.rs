@@ -169,6 +169,12 @@ pub(super) fn append_response_stream_event_text(
             )?;
             Ok(None)
         }
+        Some("response.reasoning_summary_text.delta") => {
+            renderer
+                .push_thinking(required_str(event, "delta")?)
+                .map_err(|err| err.to_string())?;
+            Ok(None)
+        }
         Some("error") | Some("response.error") => Ok(extract_error_message(event)),
         _ => Ok(None),
     }
@@ -191,6 +197,9 @@ pub(super) fn summarize_stream_event(event: &Value) -> String {
     }
     if let Some(content_index) = event.get("content_index").and_then(Value::as_u64) {
         parts.push(format!("content_index={content_index}"));
+    }
+    if let Some(summary_index) = event.get("summary_index").and_then(Value::as_u64) {
+        parts.push(format!("summary_index={summary_index}"));
     }
 
     if parts.is_empty() {
