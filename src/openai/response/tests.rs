@@ -224,6 +224,67 @@ fn reasoning_deltas_do_not_pollute_final_message_content() {
 }
 
 #[test]
+fn backfills_final_message_from_response_completed_output() {
+    let mut renderer = StreamRenderer::new(StreamOutput::None);
+    let mut accumulator = ResponseTextAccumulator::default();
+
+    for event in [
+        json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {
+                "type": "reasoning",
+                "id": "rs_1",
+                "content": []
+            }
+        }),
+        json!({
+            "type": "response.reasoning_text.delta",
+            "item_id": "rs_1",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": "Analyzing the diff"
+        }),
+        json!({
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {
+                        "type": "reasoning",
+                        "id": "rs_1",
+                        "content": [
+                            {
+                                "type": "reasoning_text",
+                                "text": "Analyzing the diff"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "message",
+                        "id": "msg_1",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "enable multi_screen for session-manager plugin"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }),
+    ] {
+        let result =
+            append_response_stream_event_text(&event, &mut renderer, &mut accumulator, false);
+        assert_eq!(result.unwrap(), None);
+    }
+
+    assert_eq!(
+        accumulator.content(),
+        "enable multi_screen for session-manager plugin"
+    );
+}
+
+#[test]
 fn summarizes_stream_event_with_key_identifiers() {
     let summary = summarize_stream_event(&json!({
         "type": "response.reasoning_summary_text.delta",

@@ -169,6 +169,15 @@ pub(super) fn append_response_stream_event_text(
             )?;
             Ok(None)
         }
+        Some("response.completed") => {
+            accumulator.push_response_output_if_missing_from_value(
+                event
+                    .get("response")
+                    .ok_or_else(|| "responses stream event missing response".to_string())?,
+                renderer,
+            )?;
+            Ok(None)
+        }
         Some("response.reasoning_summary_text.delta") => {
             renderer
                 .push_thinking(required_str(event, "delta")?)
@@ -351,6 +360,22 @@ impl ResponseTextAccumulator {
                 )?;
             }
         }
+        Ok(())
+    }
+
+    fn push_response_output_if_missing_from_value(
+        &mut self,
+        response: &Value,
+        renderer: &mut StreamRenderer,
+    ) -> Result<(), String> {
+        let Some(output) = response.get("output").and_then(Value::as_array) else {
+            return Ok(());
+        };
+
+        for (output_index, item) in output.iter().enumerate() {
+            self.push_output_item_if_missing_from_value(output_index as u32, item, renderer)?;
+        }
+
         Ok(())
     }
 
