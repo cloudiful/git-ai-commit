@@ -51,15 +51,6 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
         eprint!("{}", repo_ctx.secret_redaction_preview);
     }
 
-    let colors_enabled = stderr_colors_enabled_with(&current_stderr_ui_env());
-    eprintln!(
-        "{}: {}",
-        style_label(colors_enabled, "git-ai-commit"),
-        style_muted(
-            colors_enabled,
-            "generating commit message from staged changes..."
-        ),
-    );
     let stream_output = if is_interactive_session() {
         StreamOutput::Stdout
     } else {

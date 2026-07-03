@@ -5,6 +5,8 @@ mod request;
 mod response;
 mod sse;
 mod stream;
+mod stream_palette;
+mod thinking_status;
 
 use crate::config::Config;
 use crate::message::validate_message;
@@ -78,6 +80,9 @@ pub(crate) async fn generate_openai_message_with_stream_output(
     };
     let mut renderer = StreamRenderer::new(effective_stream_output);
     let debug_enabled = provider_debug_enabled(debug_provider);
+    renderer
+        .show_thinking_status("drafting commit message")
+        .map_err(|err| err.to_string())?;
 
     let message = match endpoint_preference_for_generation(cfg) {
         ApiEndpointPreference::ResponsesOnly => {
@@ -101,6 +106,9 @@ pub(crate) async fn generate_openai_message_with_stream_output(
                         );
                     }
                     renderer.reset();
+                    renderer
+                        .show_thinking_status("retrying commit message generation")
+                        .map_err(|err| err.to_string())?;
                     generate_message_via_chat_completions(
                         cfg,
                         &prompt,

@@ -1,25 +1,18 @@
 use super::StreamOutput;
-use std::env;
+use super::stream_palette::{StreamPalette, StreamRole};
+use super::thinking_status::ThinkingStatus;
 use std::io::Write;
-
-const ANSI_RESET: &str = "\x1b[0m";
-const ANSI_SUBJECT: &str = "\x1b[1;36m";
-const ANSI_BODY: &str = "\x1b[39m";
-const ANSI_THINKING: &str = "\x1b[90m";
-const ANSI_CLEAR_LINE: &str = "\x1b[2K";
-const THINKING_SPINNER_FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
 
 pub(crate) struct StreamRenderer {
     output: StreamOutput,
     started: bool,
     completed: bool,
-    colors_enabled: bool,
+    rendered_message: bool,
+    palette: StreamPalette,
     in_subject_line: bool,
     in_thinking: bool,
     pending_tag: String,
-    thinking_status_active: bool,
-    thinking_status_text: String,
-    thinking_status_frame: usize,
+    thinking_status: ThinkingStatus,
 }
 
 impl StreamRenderer {
@@ -28,13 +21,12 @@ impl StreamRenderer {
             output,
             started: false,
             completed: false,
-            colors_enabled: stream_colors_enabled(output),
+            rendered_message: false,
+            palette: StreamPalette::detect(output),
             in_subject_line: true,
             in_thinking: false,
             pending_tag: String::new(),
-            thinking_status_active: false,
-            thinking_status_text: String::new(),
-            thinking_status_frame: 0,
+            thinking_status: ThinkingStatus::default(),
         }
     }
 
@@ -74,8 +66,21 @@ impl StreamRenderer {
             self.started = true;
         }
 
-        self.thinking_status_active = true;
-        self.thinking_status_text.push_str(text);
+        self.thinking_status.push_text(text);
+        self.redraw_thinking_status()
+    }
+
+    pub(crate) fn show_thinking_status(&mut self, text: &str) -> std::io::Result<()> {
+        if text.is_empty() || !self.enabled() {
+            return Ok(());
+        }
+
+        if !self.started {
+            self.start_output()?;
+            self.started = true;
+        }
+
+        self.thinking_status.show_placeholder(text);
         self.redraw_thinking_status()
     }
 
@@ -87,23 +92,20 @@ impl StreamRenderer {
         match self.output {
             StreamOutput::Stdout => {
                 let mut stdout = std::io::stdout().lock();
-                self.write_clear_thinking_status(&mut stdout)?;
-                if self.colors_enabled {
-                    write!(stdout, "{ANSI_RESET}")?;
-                }
+                self.thinking_status.clear(&mut stdout)?;
+                self.palette.write_reset(&mut stdout)?;
                 writeln!(stdout)?;
                 stdout.flush()?;
             }
             StreamOutput::None => {}
         }
         self.started = false;
-        self.completed = true;
+        self.completed = self.rendered_message;
         self.in_subject_line = true;
         self.in_thinking = false;
         self.pending_tag.clear();
-        self.thinking_status_active = false;
-        self.thinking_status_text.clear();
-        self.thinking_status_frame = 0;
+        self.thinking_status.reset();
+        self.rendered_message = false;
         Ok(())
     }
 
@@ -111,12 +113,11 @@ impl StreamRenderer {
         let _ = self.clear_thinking_status();
         self.started = false;
         self.completed = false;
+        self.rendered_message = false;
         self.in_subject_line = true;
         self.in_thinking = false;
         self.pending_tag.clear();
-        self.thinking_status_active = false;
-        self.thinking_status_text.clear();
-        self.thinking_status_frame = 0;
+        self.thinking_status.reset();
     }
 
     pub(crate) fn completed_render(&self) -> bool {
@@ -175,7 +176,7 @@ impl StreamRenderer {
         match self.output {
             StreamOutput::Stdout => {
                 let mut stdout = std::io::stdout().lock();
-                self.write_thinking_status(&mut stdout)?;
+                self.thinking_status.render(&mut stdout, self.palette)?;
                 stdout.flush()
             }
             StreamOutput::None => Ok(()),
@@ -186,64 +187,31 @@ impl StreamRenderer {
         match self.output {
             StreamOutput::Stdout => {
                 let mut stdout = std::io::stdout().lock();
-                self.write_clear_thinking_status(&mut stdout)?;
+                self.thinking_status.clear(&mut stdout)?;
                 stdout.flush()
             }
             StreamOutput::None => Ok(()),
         }
     }
 
-    fn write_thinking_status<W: Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
-        self.write_clear_thinking_status(writer)?;
-        let frame =
-            THINKING_SPINNER_FRAMES[self.thinking_status_frame % THINKING_SPINNER_FRAMES.len()];
-        self.thinking_status_frame = self.thinking_status_frame.wrapping_add(1);
-        let status_text = thinking_status_text(&self.thinking_status_text);
-        self.thinking_status_active = true;
-
-        if self.colors_enabled {
-            write!(writer, "{ANSI_THINKING}")?;
-        }
-        write!(writer, "{frame} thinking")?;
-        if !status_text.is_empty() {
-            write!(writer, ": {status_text}")?;
-        }
-        if self.colors_enabled {
-            write!(writer, "{ANSI_RESET}")?;
-        }
-        Ok(())
-    }
-
-    fn write_clear_thinking_status<W: Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
-        if !self.thinking_status_active {
-            return Ok(());
-        }
-
-        write!(writer, "\r{ANSI_CLEAR_LINE}\r")?;
-        self.thinking_status_active = false;
-        Ok(())
-    }
-
-    fn current_style(&self) -> &'static str {
+    fn current_role(&self) -> StreamRole {
         if self.in_thinking {
-            ANSI_THINKING
+            StreamRole::Thinking
         } else if self.in_subject_line {
-            ANSI_SUBJECT
+            StreamRole::Subject
         } else {
-            ANSI_BODY
+            StreamRole::Body
         }
     }
 
     fn write_char<W: Write>(&mut self, writer: &mut W, ch: char) -> std::io::Result<()> {
-        if self.colors_enabled {
-            write!(writer, "{}", self.current_style())?;
-        }
+        self.rendered_message = true;
+        self.palette
+            .write_style_prefix(writer, self.current_role())?;
 
         if ch == '\n' {
             writeln!(writer)?;
-            if self.colors_enabled {
-                write!(writer, "{ANSI_RESET}")?;
-            }
+            self.palette.write_reset(writer)?;
             if !self.in_thinking {
                 self.in_subject_line = false;
             }
@@ -264,48 +232,31 @@ impl StreamRenderer {
     }
 }
 
-fn stream_colors_enabled(output: StreamOutput) -> bool {
-    if matches!(output, StreamOutput::None) {
-        return false;
-    }
-
-    if env::var_os("NO_COLOR").is_some() {
-        return false;
-    }
-
-    if matches!(env::var("TERM"), Ok(term) if term.eq_ignore_ascii_case("dumb")) {
-        return false;
-    }
-
-    true
-}
-
-fn thinking_status_text(text: &str) -> String {
-    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut chars = compact.chars();
-    let preview = chars.by_ref().take(80).collect::<String>();
-    if chars.next().is_some() {
-        format!("{preview}...")
-    } else {
-        preview
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        ANSI_BODY, ANSI_CLEAR_LINE, ANSI_RESET, ANSI_SUBJECT, ANSI_THINKING, StreamOutput,
-        StreamRenderer, thinking_status_text,
-    };
+    use super::{StreamOutput, StreamRenderer};
+    use crate::openai::stream_palette::StreamPalette;
     use std::io::BufRead;
     use std::io::Cursor;
 
-    fn strip_known_ansi(input: &str) -> String {
-        input
-            .replace(ANSI_THINKING, "")
-            .replace(ANSI_SUBJECT, "")
-            .replace(ANSI_BODY, "")
-            .replace(ANSI_RESET, "")
+    fn strip_ansi(input: &str) -> String {
+        let mut out = String::new();
+        let mut chars = input.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' && chars.peek() == Some(&'[') {
+                chars.next();
+                for next in chars.by_ref() {
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+                continue;
+            }
+            out.push(ch);
+        }
+
+        out
     }
 
     fn parse_sse_payloads<R, F>(reader: R, mut on_payload: F) -> Result<(), String>
@@ -374,7 +325,7 @@ mod tests {
     #[test]
     fn styles_thinking_sections_and_keeps_subject_color() {
         let mut renderer = StreamRenderer::new(StreamOutput::Stdout);
-        renderer.colors_enabled = true;
+        renderer.palette = StreamPalette::Ansi;
         let mut out = Vec::new();
 
         renderer
@@ -382,20 +333,18 @@ mod tests {
             .unwrap();
 
         let rendered = String::from_utf8(out).unwrap();
-        let plain = strip_known_ansi(&rendered);
-        assert!(rendered.contains(ANSI_THINKING));
-        assert!(rendered.contains(ANSI_SUBJECT));
-        assert!(rendered.contains(ANSI_BODY));
+        let plain = strip_ansi(&rendered);
+        assert!(rendered.contains("\x1b["));
         assert!(plain.contains("drafting"));
         assert!(plain.contains("feat: add parser"));
         assert!(plain.contains("Body"));
-        assert!(rendered.contains(&format!("\n{ANSI_RESET}")));
+        assert!(rendered.contains("\n\x1b[0m"));
     }
 
     #[test]
     fn handles_split_think_tags_across_chunks() {
         let mut renderer = StreamRenderer::new(StreamOutput::Stdout);
-        renderer.colors_enabled = true;
+        renderer.palette = StreamPalette::Ansi;
         let mut out = Vec::new();
 
         renderer.write_styled(&mut out, "<thi").unwrap();
@@ -405,37 +354,24 @@ mod tests {
             .unwrap();
 
         let rendered = String::from_utf8(out).unwrap();
-        let plain = strip_known_ansi(&rendered);
-        assert!(rendered.contains(ANSI_THINKING));
-        assert!(rendered.contains(ANSI_SUBJECT));
+        let plain = strip_ansi(&rendered);
+        assert!(rendered.contains("\x1b["));
         assert!(plain.contains("plan"));
         assert!(plain.contains("fix: tighten prompt"));
     }
 
     #[test]
-    fn thinking_status_text_compacts_and_truncates() {
-        let status = thinking_status_text(
-            "considering   staged\n\nchanges and summarizing the diff in a compact way for terminal display",
-        );
-
-        assert!(status.starts_with("considering staged changes"));
-        assert!(status.ends_with("..."));
-    }
-
-    #[test]
-    fn write_thinking_status_renders_spinner_line() {
+    fn truecolor_palette_uses_lighter_body_tone() {
         let mut renderer = StreamRenderer::new(StreamOutput::Stdout);
-        renderer.colors_enabled = true;
-        renderer.thinking_status_active = true;
-        renderer.thinking_status_text = "considering diff".to_string();
+        renderer.palette = StreamPalette::TrueColor;
         let mut out = Vec::new();
 
-        renderer.write_thinking_status(&mut out).unwrap();
+        renderer
+            .write_styled(&mut out, "feat: add parser\nBody")
+            .unwrap();
 
         let rendered = String::from_utf8(out).unwrap();
-        let plain = strip_known_ansi(&rendered);
-        assert!(rendered.contains(ANSI_CLEAR_LINE));
-        assert!(rendered.contains(ANSI_THINKING));
-        assert!(plain.contains("| thinking: considering diff"));
+        assert!(rendered.contains("\x1b[38;2;120;200;255m"));
+        assert!(rendered.contains("\x1b[38;2;176;220;255m"));
     }
 }
