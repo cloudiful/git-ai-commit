@@ -219,6 +219,13 @@ pub(super) fn append_response_stream_event_text(
     }
 }
 
+pub(super) fn stream_event_completes_message(event: &Value) -> bool {
+    matches!(
+        event.get("type").and_then(Value::as_str),
+        Some("response.output_item.done" | "response.completed")
+    )
+}
+
 pub(super) fn summarize_stream_event(event: &Value) -> String {
     let mut parts = Vec::new();
 

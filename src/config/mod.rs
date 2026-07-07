@@ -15,19 +15,40 @@ pub use self::provider::{
 use self::sources::{ConfigSnapshot, load_config_snapshot};
 
 pub const DEFAULT_TIMEOUT_SEC: u64 = 15;
-pub const DEFAULT_MAX_DIFF_BYTES: usize = 60_000;
 pub const DEFAULT_MAX_DIFF_TOKENS: usize = 16_000;
 pub const MAX_AUTO_DIFF_TOKENS: usize = 64_000;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReasoningEffort {
+    #[default]
+    Low,
+    Medium,
+    High,
+}
+
+impl ReasoningEffort {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+
+    pub fn as_api_value(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DiffBudgetConfig {
-    Bytes {
-        max_bytes: usize,
-    },
-    Tokens {
-        max_tokens: usize,
-        model_context_tokens: Option<usize>,
-    },
+pub struct DiffBudgetConfig {
+    pub max_tokens: usize,
+    pub model_context_tokens: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -44,10 +65,10 @@ pub struct Config {
     pub show_timing: bool,
     pub use_env_proxy: bool,
     pub timeout: Duration,
-    pub max_diff_bytes: usize,
-    pub max_diff_tokens: Option<usize>,
+    pub max_diff_tokens: usize,
     pub max_diff_tokens_explicit: bool,
     pub model_context_tokens: Option<usize>,
+    pub reasoning_effort: ReasoningEffort,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -64,9 +85,9 @@ pub(super) struct FileConfig {
     pub(super) show_timing: Option<bool>,
     pub(super) use_env_proxy: Option<bool>,
     pub(super) timeout_sec: Option<usize>,
-    pub(super) max_diff_bytes: Option<usize>,
     pub(super) max_diff_tokens: Option<usize>,
     pub(super) model_context_tokens: Option<usize>,
+    pub(super) reasoning_effort: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -104,9 +125,9 @@ pub(super) struct RawConfigValues {
     pub(super) show_timing: Option<String>,
     pub(super) use_env_proxy: Option<String>,
     pub(super) timeout_sec: Option<String>,
-    pub(super) max_diff_bytes: Option<String>,
     pub(super) max_diff_tokens: Option<String>,
     pub(super) model_context_tokens: Option<String>,
+    pub(super) reasoning_effort: Option<String>,
 }
 
 pub fn load_config() -> Result<Config, String> {
@@ -183,23 +204,23 @@ pub fn load_partial_config() -> Result<Config, String> {
             |cfg| cfg.timeout_sec,
             DEFAULT_TIMEOUT_SEC as usize,
         )? as u64),
-        max_diff_bytes: snapshot.int_value(
-            "ai.commit.maxDiffBytes",
-            |values| values.max_diff_bytes.as_ref(),
-            |cfg| cfg.max_diff_bytes,
-            DEFAULT_MAX_DIFF_BYTES,
-        )?,
-        max_diff_tokens: Some(snapshot.int_value(
+        max_diff_tokens: snapshot.int_value(
             "ai.commit.maxDiffTokens",
             |values| values.max_diff_tokens.as_ref(),
             |cfg| cfg.max_diff_tokens,
             DEFAULT_MAX_DIFF_TOKENS,
-        )?),
+        )?,
         max_diff_tokens_explicit,
         model_context_tokens: snapshot.optional_int_value(
             "ai.commit.modelContextTokens",
             |values| values.model_context_tokens.as_ref(),
             |cfg| cfg.model_context_tokens,
+        )?,
+        reasoning_effort: snapshot.reasoning_effort_value(
+            "ai.commit.reasoningEffort",
+            |values| values.reasoning_effort.as_ref(),
+            |cfg| cfg.reasoning_effort.as_deref(),
+            ReasoningEffort::Low,
         )?,
     })
 }
@@ -315,6 +336,26 @@ impl ConfigSnapshot {
         Ok(None)
     }
 
+    pub(super) fn reasoning_effort_value(
+        &self,
+        config_key: &str,
+        raw_getter: impl Fn(&RawConfigValues) -> Option<&String>,
+        file_getter: impl Fn(&FileConfig) -> Option<&str>,
+        fallback: ReasoningEffort,
+    ) -> Result<ReasoningEffort, String> {
+        if let Some(raw) = raw_getter(&self.env).or_else(|| raw_getter(&self.git)) {
+            return ReasoningEffort::parse(raw)
+                .ok_or_else(|| format!("invalid {config_key} value {:?}", raw));
+        }
+
+        if let Some(raw) = self.file.as_ref().and_then(file_getter) {
+            return ReasoningEffort::parse(raw)
+                .ok_or_else(|| format!("invalid {config_key} value {:?}", raw));
+        }
+
+        Ok(fallback)
+    }
+
     pub(super) fn redaction_rules(&self) -> Result<RedactionRules, String> {
         let mut rules = default_redaction_rules();
         rules.secret = self.redaction_rule_value(
@@ -408,6 +449,14 @@ pub fn default_redaction_rules() -> RedactionRules {
 }
 
 impl Config {
+    pub fn provider_requires_api_key(provider: Provider, api_base: &str) -> bool {
+        match provider {
+            Provider::OpenAiCompatible => true,
+            Provider::Ollama => is_ollama_cloud_url(api_base),
+            Provider::AnthropicCompatible => true,
+        }
+    }
+
     pub fn should_use_anthropic_transport(&self) -> bool {
         self.provider == Provider::AnthropicCompatible
             || (self.provider == Provider::OpenAiCompatible
@@ -419,11 +468,7 @@ impl Config {
             return true;
         }
 
-        match self.provider {
-            Provider::OpenAiCompatible => true,
-            Provider::Ollama => self.is_ollama_cloud(),
-            Provider::AnthropicCompatible => true,
-        }
+        Self::provider_requires_api_key(self.provider, &self.api_base)
     }
 
     pub fn should_send_bearer_auth(&self) -> bool {
@@ -445,7 +490,7 @@ impl Config {
     }
 
     pub fn should_use_streaming_generation(&self) -> bool {
-        self.provider != Provider::AnthropicCompatible && !self.should_use_anthropic_transport()
+        !self.should_use_anthropic_transport()
     }
 
     pub fn auth_mode_description(&self) -> String {
@@ -482,14 +527,9 @@ impl Config {
     }
 
     pub fn diff_budget(&self) -> DiffBudgetConfig {
-        match self.max_diff_tokens {
-            Some(max_tokens) => DiffBudgetConfig::Tokens {
-                max_tokens,
-                model_context_tokens: self.model_context_tokens,
-            },
-            None => DiffBudgetConfig::Bytes {
-                max_bytes: self.max_diff_bytes,
-            },
+        DiffBudgetConfig {
+            max_tokens: self.max_diff_tokens,
+            model_context_tokens: self.model_context_tokens,
         }
     }
 }

@@ -29,16 +29,12 @@ pub fn prepare_diff_for_prompt(
         stat_truncated: false,
     };
 
-    let tokenizer = if budget.is_token_mode() {
-        Some(Tokenizer::new()?)
-    } else {
-        None
-    };
+    let tokenizer = Tokenizer::new()?;
     let (trimmed_stat, stat_truncated) = trim_text_with_notice(
         diff_stat,
         diff_stat_cap(budget),
         DIFF_STAT_TRUNCATED_NOTICE,
-        tokenizer.as_ref(),
+        Some(&tokenizer),
     );
     result.stat_truncated = stat_truncated;
 
@@ -48,10 +44,10 @@ pub fn prepare_diff_for_prompt(
         &normalized_patch,
         patch_budget(
             budget,
-            text_len(&trimmed_stat, tokenizer.as_ref()),
-            text_len(DIFF_SAMPLING_NOTICE, tokenizer.as_ref()),
+            text_len(&trimmed_stat, Some(&tokenizer)),
+            text_len(DIFF_SAMPLING_NOTICE, Some(&tokenizer)),
         ),
-        tokenizer.as_ref(),
+        Some(&tokenizer),
     );
     result.represented_files = represented_files;
     result.sampled = sampled;

@@ -72,3 +72,19 @@ fn reads_redaction_rules_from_file_config() {
     assert!(cfg.redaction_rules.person);
     assert!(cfg.redaction_rules.secret);
 }
+
+#[test]
+fn rejects_invalid_reasoning_effort_values() {
+    let mut env = TestConfigEnv::new();
+    env.write_config_file(
+        r#"{
+  "api_base": "https://example.com/v1",
+  "api_key": "token",
+  "model": "gpt-4.1-mini",
+  "reasoning_effort": "turbo"
+}"#,
+    );
+
+    let err = load_partial_config().expect_err("expected invalid reasoning effort");
+    assert!(err.contains("invalid ai.commit.reasoningEffort value"));
+}

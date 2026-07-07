@@ -318,10 +318,10 @@ mod tests {
             show_timing: true,
             use_env_proxy: false,
             timeout: Duration::from_secs(5),
-            max_diff_bytes: 60_000,
-            max_diff_tokens: Some(16_000),
+            max_diff_tokens: 16_000,
             max_diff_tokens_explicit: false,
             model_context_tokens: None,
+            reasoning_effort: crate::config::ReasoningEffort::Low,
         }
     }
 }

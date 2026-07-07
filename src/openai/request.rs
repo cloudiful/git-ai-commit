@@ -13,11 +13,7 @@ pub(crate) fn build_prompt(repo_ctx: &RepoContext) -> String {
     );
     prompt.push_str("Diff coverage: ");
     if repo_ctx.diff_truncated {
-        if repo_ctx.diff_budget_is_token_mode {
-            prompt.push_str("selective sample within token budget");
-        } else {
-            prompt.push_str("selective sample within byte budget");
-        }
+        prompt.push_str("selective sample within token budget");
     } else {
         prompt.push_str("full");
     }
@@ -215,7 +211,6 @@ mod tests {
             repo_name: "repo".to_string(),
             branch_name: "main".to_string(),
             diff_truncated: true,
-            diff_budget_is_token_mode: true,
             changed_file_count: 3,
             represented_file_count: 2,
             ..RepoContext::default()

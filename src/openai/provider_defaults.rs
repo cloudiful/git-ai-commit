@@ -8,12 +8,12 @@ pub(super) enum EndpointKind {
 }
 
 pub(super) fn apply_provider_body_defaults(
-    _cfg: &Config,
+    cfg: &Config,
     endpoint_kind: EndpointKind,
     body: &mut Value,
 ) {
     if endpoint_kind == EndpointKind::Responses && body.get("reasoning").is_none() {
-        body["reasoning"] = json!({ "effort": "low" });
+        body["reasoning"] = json!({ "effort": cfg.reasoning_effort.as_api_value() });
     }
 }
 
@@ -25,7 +25,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn adds_minimal_reasoning_for_all_responses_requests() {
+    fn adds_default_reasoning_effort_for_responses_requests() {
         let cfg = sample_config("gpt-4.1-mini");
         let mut body = json!({
             "model": "gpt-4.1-mini",
@@ -38,7 +38,7 @@ mod tests {
     }
 
     #[test]
-    fn does_not_override_explicit_reasoning() {
+    fn preserves_explicit_reasoning() {
         let cfg = sample_config("gpt-4.1-mini");
         let mut body = json!({
             "model": "gpt-4.1-mini",
@@ -63,6 +63,20 @@ mod tests {
         assert!(body.get("reasoning").is_none());
     }
 
+    #[test]
+    fn uses_configured_reasoning_effort() {
+        let mut cfg = sample_config("gpt-4.1-mini");
+        cfg.reasoning_effort = crate::config::ReasoningEffort::High;
+        let mut body = json!({
+            "model": "gpt-4.1-mini",
+            "input": "hello"
+        });
+
+        apply_provider_body_defaults(&cfg, EndpointKind::Responses, &mut body);
+
+        assert_eq!(body["reasoning"], json!({ "effort": "high" }));
+    }
+
     fn sample_config(model: &str) -> Config {
         Config {
             provider: Provider::OpenAiCompatible,
@@ -77,10 +91,10 @@ mod tests {
             show_timing: true,
             use_env_proxy: false,
             timeout: Duration::from_secs(15),
-            max_diff_bytes: 60_000,
-            max_diff_tokens: Some(16_000),
+            max_diff_tokens: 16_000,
             max_diff_tokens_explicit: false,
             model_context_tokens: None,
+            reasoning_effort: crate::config::ReasoningEffort::Low,
         }
     }
 }

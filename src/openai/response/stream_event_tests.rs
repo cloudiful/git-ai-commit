@@ -1,7 +1,5 @@
+use crate::openai::response::{ResponseTextAccumulator, append_response_stream_event_text};
 use crate::openai::{StreamOutput, StreamRenderer};
-use crate::openai::response::{
-    ResponseTextAccumulator, append_response_stream_event_text,
-};
 use serde_json::json;
 
 #[test]

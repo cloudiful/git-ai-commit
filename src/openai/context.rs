@@ -170,7 +170,7 @@ fn apply_auto_diff_token_limit(cfg: &mut Config, model_context_tokens: usize) {
     }
 
     let suggested = (model_context_tokens / 4).clamp(DEFAULT_MAX_DIFF_TOKENS, MAX_AUTO_DIFF_TOKENS);
-    cfg.max_diff_tokens = Some(suggested);
+    cfg.max_diff_tokens = suggested;
 }
 
 #[cfg(test)]
@@ -237,7 +237,7 @@ mod tests {
 
         apply_auto_diff_token_limit(&mut cfg, 1_048_576);
 
-        assert_eq!(cfg.max_diff_tokens, Some(64_000));
+        assert_eq!(cfg.max_diff_tokens, 64_000);
     }
 
     #[test]
@@ -270,7 +270,7 @@ mod tests {
             "deepseek/deepseek-v4-flash",
             Some(1_048_576),
         );
-        cfg.max_diff_tokens = Some(20_000);
+        cfg.max_diff_tokens = 20_000;
         cfg.max_diff_tokens_explicit = true;
 
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -279,7 +279,7 @@ mod tests {
             .expect("runtime");
         let resolved = rt.block_on(resolve_model_context_config(&cfg, false));
 
-        assert_eq!(resolved.max_diff_tokens, Some(20_000));
+        assert_eq!(resolved.max_diff_tokens, 20_000);
     }
 
     fn sample_config(api_base: &str, model: &str, model_context_tokens: Option<usize>) -> Config {
@@ -296,10 +296,10 @@ mod tests {
             show_timing: true,
             use_env_proxy: false,
             timeout: Duration::from_secs(5),
-            max_diff_bytes: 60_000,
-            max_diff_tokens: Some(16_000),
+            max_diff_tokens: 16_000,
             max_diff_tokens_explicit: false,
             model_context_tokens,
+            reasoning_effort: crate::config::ReasoningEffort::Low,
         }
     }
 

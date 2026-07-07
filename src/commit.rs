@@ -3,11 +3,9 @@ mod confirm;
 mod doctor;
 
 use crate::generate::{log_timing, timing_summary};
-use crate::git::{collect_repo_context, run_git_interactive};
-use crate::openai::{
-    StreamOutput, generate_message_with_stream_output, resolve_model_context_config,
-};
-use crate::prompt::{is_interactive_session, load_config_for_interactive_use};
+use crate::generation::{StreamOutputMode, execute_generation, prepare_generation};
+use crate::git::run_git_interactive;
+use crate::prompt::is_interactive_session;
 use crate::terminal_ui::{
     TerminalUiEnv, current_stderr_ui_env, stderr_colors_enabled_with, style_accent, style_label,
     style_muted, style_subject,
@@ -27,18 +25,18 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
 
     let parsed_args = parse_ai_commit_args(args)?;
     let started = Instant::now();
-    let cfg = match load_config_for_interactive_use() {
-        Ok(cfg) => cfg,
+    let prepared = match prepare_generation(
+        parsed_args.debug_provider,
+        StreamOutputMode::InteractiveSession,
+    )
+    .await
+    {
+        Ok(prepared) => prepared,
         Err(err) => return run_plain_commit_with_notice(&parsed_args.forward_args, &err),
     };
-
-    let cfg = resolve_model_context_config(&cfg, parsed_args.debug_provider).await;
-
-    let repo_ctx = match collect_repo_context(&cfg) {
-        Ok(ctx) => ctx,
-        Err(err) => return run_plain_commit_with_notice(&parsed_args.forward_args, &err),
-    };
-    if repo_ctx.diff_stat.trim().is_empty() && repo_ctx.diff_patch.trim().is_empty() {
+    if prepared.repo_ctx.diff_stat.trim().is_empty()
+        && prepared.repo_ctx.diff_patch.trim().is_empty()
+    {
         return run_plain_commit_with_notice(
             &parsed_args.forward_args,
             "no staged changes available for AI prompt",
@@ -46,25 +44,13 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
     }
     if is_interactive_session()
         && parsed_args.show_redactions
-        && !repo_ctx.secret_redaction_preview.is_empty()
+        && !prepared.repo_ctx.secret_redaction_preview.is_empty()
     {
-        eprint!("{}", repo_ctx.secret_redaction_preview);
+        eprint!("{}", prepared.repo_ctx.secret_redaction_preview);
     }
 
-    let stream_output = if is_interactive_session() {
-        StreamOutput::Stdout
-    } else {
-        StreamOutput::None
-    };
-    let (message, metrics) = match generate_message_with_stream_output(
-        &cfg,
-        &repo_ctx,
-        stream_output,
-        parsed_args.debug_provider,
-    )
-    .await
-    {
-        Ok(value) => value,
+    let generated = match execute_generation(&prepared, parsed_args.debug_provider).await {
+        Ok(generated) => generated,
         Err(err) => {
             return Err(format!(
                 "git-ai-commit: failed to generate commit message: {err}"
@@ -72,14 +58,18 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
         }
     };
 
-    let mut message_file = write_commit_message_temp_file(&message)?;
-    let timing_summary = timing_summary(&cfg, started, metrics);
-    if !metrics.streamed_render_completed {
-        eprint!("{}", commit_message_preview(&message));
+    let mut message_file = write_commit_message_temp_file(&generated.message)?;
+    let timing_summary = timing_summary(&prepared.cfg, started);
+    if !generated.streamed_render_completed {
+        eprint!("{}", commit_message_preview(&generated.message));
     }
 
-    let mut open_editor = cfg.open_editor;
-    if is_interactive_session() && parsed_args.confirm_override.unwrap_or(cfg.confirm_commit) {
+    let mut open_editor = prepared.cfg.open_editor;
+    if is_interactive_session()
+        && parsed_args
+            .confirm_override
+            .unwrap_or(prepared.cfg.confirm_commit)
+    {
         match prompt_for_commit_confirmation(timing_summary.as_deref())? {
             CommitConfirmation::Proceed => {}
             CommitConfirmation::Edit => open_editor = true,
@@ -89,7 +79,7 @@ pub async fn run_commit(args: &[String]) -> Result<(), String> {
             }
         }
     } else {
-        log_timing(&cfg, started, metrics);
+        log_timing(&prepared.cfg, started);
     }
 
     let commit_args = build_ai_commit_args(

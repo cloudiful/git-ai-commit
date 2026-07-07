@@ -210,7 +210,10 @@ fn keeps_full_diff_when_under_budget() {
         &files,
         diff_stat,
         &diff_patch,
-        DiffBudget::Bytes { max_bytes: 6000 },
+        DiffBudget {
+            configured_tokens: 6000,
+            effective_tokens: 6000,
+        },
     )
     .expect("diff prep");
 
@@ -257,7 +260,7 @@ fn token_mode_falls_back_to_notice_when_context_leaves_no_diff_space() {
         &files,
         diff_stat,
         &diff_patch,
-        DiffBudget::Tokens {
+        DiffBudget {
             configured_tokens: 1000,
             effective_tokens: 0,
         },
@@ -271,7 +274,7 @@ fn token_mode_falls_back_to_notice_when_context_leaves_no_diff_space() {
 #[test]
 fn token_budget_is_clamped_by_context() {
     let budget = resolve_diff_budget(
-        DiffBudgetConfig::Tokens {
+        DiffBudgetConfig {
             max_tokens: 100_000,
             model_context_tokens: Some(10_000),
         },
@@ -281,16 +284,8 @@ fn token_budget_is_clamped_by_context() {
     )
     .expect("resolved budget");
 
-    match budget {
-        DiffBudget::Tokens {
-            configured_tokens,
-            effective_tokens,
-        } => {
-            assert_eq!(configured_tokens, 100_000);
-            assert!(effective_tokens < configured_tokens);
-        }
-        DiffBudget::Bytes { .. } => panic!("expected token budget"),
-    }
+    assert_eq!(budget.configured_tokens, 100_000);
+    assert!(budget.effective_tokens < budget.configured_tokens);
 }
 
 fn build_multi_file_diff(files: &[&str], repeat: usize) -> String {

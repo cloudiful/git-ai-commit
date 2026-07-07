@@ -5,6 +5,7 @@ mod config;
 mod diff_parse;
 mod diff_sampling;
 mod generate;
+mod generation;
 mod git;
 mod message;
 mod openai;

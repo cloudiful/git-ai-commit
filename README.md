@@ -108,6 +108,7 @@ Most users only need these keys:
 - `ai.commit.redactSecrets`
 - `ai.commit.maxDiffTokens`
 - `ai.commit.modelContextTokens`
+- `ai.commit.reasoningEffort`
 
 Environment variables can override config, including:
 
@@ -116,6 +117,7 @@ Environment variables can override config, including:
 - `GIT_AI_COMMIT_API_KEY`
 - `GIT_AI_COMMIT_MODEL`
 - `GIT_AI_COMMIT_ENABLE_FALLBACK`
+- `GIT_AI_COMMIT_REASONING_EFFORT`
 
 ## Behavior Notes
 
@@ -154,6 +156,6 @@ If a provider completes `responses` with output tokens but no visible text, `git
 
 Streaming transport failures now include read-progress context such as chunk count, byte count, SSE event count, the last parsed event, and a short tail preview from the response body.
 
-OpenAI-compatible `responses` requests now default to `reasoning.effort = "low"` unless the request body already specifies a `reasoning` object.
+OpenAI-compatible `responses` requests send `reasoning.effort = "low"` by default. Override it with `ai.commit.reasoningEffort` or `GIT_AI_COMMIT_REASONING_EFFORT` using `low`, `medium`, or `high`.
 
 When a `responses` stream emits `reasoning_summary_text` deltas, `git-ai-commit` now shows a dim Unicode spinner with a soft animated gradient thinking status line in the terminal while keeping them out of the final commit message. The thinking text stays within a fixed-width window and scrolls as it updates. On true-color terminals, the streamed subject and body also use a softer same-family palette instead of the plain default body white.

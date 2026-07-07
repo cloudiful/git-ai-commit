@@ -21,10 +21,12 @@ fn preserves_env_git_file_precedence() {
     env.write_git_config("ai.commit.openEditor", "yes");
     env.write_git_config("ai.commit.maxDiffTokens", "2000");
     env.write_git_config("ai.commit.modelContextTokens", "4000");
+    env.write_git_config("ai.commit.reasoningEffort", "medium");
 
     env.set_env("GIT_AI_COMMIT_MODEL", Some("env-model"));
     env.set_env("GIT_AI_COMMIT_CONFIRM_COMMIT", Some("yes"));
     env.set_env("GIT_AI_COMMIT_MAX_DIFF_TOKENS", Some("3000"));
+    env.set_env("GIT_AI_COMMIT_REASONING_EFFORT", Some("high"));
 
     let cfg = load_config().expect("expected config");
 
@@ -33,6 +35,7 @@ fn preserves_env_git_file_precedence() {
     assert_eq!(cfg.model, "env-model");
     assert!(cfg.confirm_commit);
     assert!(cfg.open_editor);
-    assert_eq!(cfg.max_diff_tokens, Some(3000));
+    assert_eq!(cfg.max_diff_tokens, 3000);
     assert_eq!(cfg.model_context_tokens, Some(4000));
+    assert_eq!(cfg.reasoning_effort.as_api_value(), "high");
 }

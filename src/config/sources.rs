@@ -42,9 +42,9 @@ fn load_env_values() -> RawConfigValues {
         show_timing: env_value("GIT_AI_COMMIT_SHOW_TIMING"),
         use_env_proxy: env_value("GIT_AI_COMMIT_USE_ENV_PROXY"),
         timeout_sec: env_value("GIT_AI_COMMIT_TIMEOUT_SEC"),
-        max_diff_bytes: env_value("GIT_AI_COMMIT_MAX_DIFF_BYTES"),
         max_diff_tokens: env_value("GIT_AI_COMMIT_MAX_DIFF_TOKENS"),
         model_context_tokens: env_value("GIT_AI_COMMIT_MODEL_CONTEXT_TOKENS"),
+        reasoning_effort: env_value("GIT_AI_COMMIT_REASONING_EFFORT"),
     }
 }
 
@@ -70,9 +70,9 @@ fn load_git_values() -> RawConfigValues {
         show_timing: git_value("ai.commit.showTiming"),
         use_env_proxy: git_value("ai.commit.useEnvProxy"),
         timeout_sec: git_value("ai.commit.timeoutSec"),
-        max_diff_bytes: git_value("ai.commit.maxDiffBytes"),
         max_diff_tokens: git_value("ai.commit.maxDiffTokens"),
         model_context_tokens: git_value("ai.commit.modelContextTokens"),
+        reasoning_effort: git_value("ai.commit.reasoningEffort"),
     }
 }
 

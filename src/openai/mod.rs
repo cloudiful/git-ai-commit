@@ -1,5 +1,6 @@
 mod byot;
 mod context;
+mod http_transport;
 mod provider_defaults;
 mod request;
 mod response;
@@ -28,9 +29,10 @@ pub(crate) use context::{detect_model_context_tokens, resolve_model_context_conf
 use request::ApiEndpointPreference;
 use response::should_retry_without_stream_message;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct GenerationMetrics {
+#[derive(Clone, Debug, Default)]
+pub struct GeneratedMessage {
     pub streamed_render_completed: bool,
+    pub message: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,7 +52,7 @@ pub async fn generate_message_with_stream_output(
     repo_ctx: &crate::git::RepoContext,
     stream_output: StreamOutput,
     debug_provider: bool,
-) -> Result<(String, GenerationMetrics), String> {
+) -> Result<GeneratedMessage, String> {
     if cfg.should_use_anthropic_transport() {
         return crate::anthropic::generate_anthropic_message_with_stream_output(
             cfg,
@@ -68,7 +70,7 @@ pub(crate) async fn generate_openai_message_with_stream_output(
     repo_ctx: &crate::git::RepoContext,
     stream_output: StreamOutput,
     debug_provider: bool,
-) -> Result<(String, GenerationMetrics), String> {
+) -> Result<GeneratedMessage, String> {
     let prompt = build_prompt(repo_ctx);
     let effective_stream_output = if cfg.should_use_streaming_generation() {
         stream_output
@@ -120,11 +122,12 @@ pub(crate) async fn generate_openai_message_with_stream_output(
     };
 
     renderer.finish().map_err(|err| err.to_string())?;
-    let metrics = GenerationMetrics {
+    let result = GeneratedMessage {
         streamed_render_completed: renderer.completed_render(),
+        message,
     };
-    validate_message(&message)?;
-    Ok((message, metrics))
+    validate_message(&result.message)?;
+    Ok(result)
 }
 
 fn endpoint_preference_for_generation(cfg: &Config) -> ApiEndpointPreference {
@@ -331,10 +334,10 @@ mod tests {
             show_timing: true,
             use_env_proxy: false,
             timeout: Duration::from_secs(5),
-            max_diff_bytes: 60_000,
-            max_diff_tokens: Some(16_000),
+            max_diff_tokens: 16_000,
             max_diff_tokens_explicit: false,
             model_context_tokens: None,
+            reasoning_effort: crate::config::ReasoningEffort::Low,
         }
     }
 }

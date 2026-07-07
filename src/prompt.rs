@@ -1,7 +1,4 @@
-use crate::config::{
-    Config, DEFAULT_OLLAMA_API_BASE, Provider, is_ollama_cloud_url, load_config,
-    load_partial_config,
-};
+use crate::config::{Config, DEFAULT_OLLAMA_API_BASE, Provider, load_config, load_partial_config};
 use std::io::{self, BufRead, IsTerminal, Write};
 
 pub fn load_config_for_interactive_use() -> Result<Config, String> {
@@ -79,14 +76,6 @@ impl ProviderPromptProfile {
             },
         }
     }
-
-    fn requires_api_key(self, provider: Provider, api_base: &str) -> bool {
-        match provider {
-            Provider::OpenAiCompatible => true,
-            Provider::Ollama => is_ollama_cloud_url(api_base),
-            Provider::AnthropicCompatible => true,
-        }
-    }
 }
 
 fn collect_pending_interactive_config<R, W>(
@@ -162,14 +151,14 @@ fn prompt_api_key<R, W>(
     should_reprompt_provider_fields: bool,
     api_base: &str,
     provider: Provider,
-    provider_profile: ProviderPromptProfile,
+    _provider_profile: ProviderPromptProfile,
     session: &mut PromptSession<'_, R, W>,
 ) -> Result<Option<String>, String>
 where
     R: BufRead,
     W: Write,
 {
-    if !provider_profile.requires_api_key(provider, api_base)
+    if !Config::provider_requires_api_key(provider, api_base)
         || (!should_reprompt_provider_fields && !existing.api_key.trim().is_empty())
     {
         return Ok(None);
@@ -441,10 +430,10 @@ mod tests {
             show_timing: true,
             use_env_proxy: false,
             timeout: Duration::from_secs(5),
-            max_diff_bytes: 60_000,
-            max_diff_tokens: Some(16_000),
+            max_diff_tokens: 16_000,
             max_diff_tokens_explicit: false,
             model_context_tokens: None,
+            reasoning_effort: crate::config::ReasoningEffort::Low,
         }
     }
 }

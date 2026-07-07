@@ -1,33 +1,20 @@
-use crate::git::collect_repo_context;
-use crate::openai::{
-    GenerationMetrics, StreamOutput, generate_message_with_stream_output,
-    resolve_model_context_config,
-};
-use crate::prompt::load_config_for_interactive_use;
+use crate::generation::{StreamOutputMode, execute_generation, prepare_generation};
 use crate::terminal_ui::{stderr_colors_enabled, style_label, style_muted};
-use std::io::IsTerminal;
 use std::time::{Duration, Instant};
 
 pub async fn run_generate() -> Result<(), String> {
     let started = Instant::now();
-    let cfg = resolve_model_context_config(&load_config_for_interactive_use()?, false).await;
-    let repo_ctx = collect_repo_context(&cfg)?;
-    let stream_output = if std::io::stdout().is_terminal() {
-        StreamOutput::Stdout
-    } else {
-        StreamOutput::None
-    };
-    let (message, metrics) =
-        generate_message_with_stream_output(&cfg, &repo_ctx, stream_output, false).await?;
-    if !metrics.streamed_render_completed {
-        println!("{message}");
+    let prepared = prepare_generation(false, StreamOutputMode::StdoutTerminal).await?;
+    let generated = execute_generation(&prepared, false).await?;
+    if !generated.streamed_render_completed {
+        println!("{}", generated.message);
     }
-    log_timing(&cfg, started, metrics);
+    log_timing(&prepared.cfg, started);
     Ok(())
 }
 
-pub fn log_timing(cfg: &crate::config::Config, started_at: Instant, metrics: GenerationMetrics) {
-    let Some(summary) = timing_summary(cfg, started_at, metrics) else {
+pub fn log_timing(cfg: &crate::config::Config, started_at: Instant) {
+    let Some(summary) = timing_summary(cfg, started_at) else {
         return;
     };
 
@@ -39,11 +26,7 @@ pub fn log_timing(cfg: &crate::config::Config, started_at: Instant, metrics: Gen
     );
 }
 
-pub fn timing_summary(
-    cfg: &crate::config::Config,
-    started_at: Instant,
-    _metrics: GenerationMetrics,
-) -> Option<String> {
+pub fn timing_summary(cfg: &crate::config::Config, started_at: Instant) -> Option<String> {
     if !cfg.show_timing {
         return None;
     }

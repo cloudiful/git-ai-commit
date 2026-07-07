@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::message::{sanitize_message, validate_message};
-use crate::openai::{GenerationMetrics, StreamOutput, StreamRenderer};
+use crate::openai::{GeneratedMessage, StreamOutput, StreamRenderer};
 use crate::provider_common::{new_http_client, provider_debug_enabled, truncate_debug_body};
 use reqwest::RequestBuilder;
 
@@ -14,7 +14,7 @@ pub(crate) async fn generate_anthropic_message_with_stream_output(
     repo_ctx: &crate::git::RepoContext,
     stream_output: StreamOutput,
     debug_provider: bool,
-) -> Result<(String, GenerationMetrics), String> {
+) -> Result<GeneratedMessage, String> {
     let debug_enabled = provider_debug_enabled(debug_provider);
     let client = new_http_client(cfg)?;
     let prompt = crate::openai::build_prompt(repo_ctx);
@@ -105,12 +105,10 @@ pub(crate) async fn generate_anthropic_message_with_stream_output(
     validate_message(&message)?;
     renderer.push(&message).map_err(|err| err.to_string())?;
     renderer.finish().map_err(|err| err.to_string())?;
-    Ok((
+    Ok(GeneratedMessage {
+        streamed_render_completed: renderer.completed_render(),
         message,
-        GenerationMetrics {
-            streamed_render_completed: renderer.completed_render(),
-        },
-    ))
+    })
 }
 
 fn apply_auth(builder: RequestBuilder, cfg: &Config) -> RequestBuilder {

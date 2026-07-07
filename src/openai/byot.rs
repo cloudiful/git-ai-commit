@@ -1,17 +1,18 @@
 use super::{
-    ApiAttemptError, StreamRenderer, apply_auth,
-    provider_defaults::{EndpointKind, apply_provider_body_defaults},
-    request, response, sse,
+    ApiAttemptError, StreamRenderer,
+    http_transport::{
+        TransportEndpoint, api_attempt_error, collect_json_sse_events, decode_json_response,
+        execute_request_with_http, log_request,
+    },
+    response,
 };
 use crate::config::Config;
-use crate::provider_common::{new_http_client, new_streaming_http_client, truncate_debug_body};
+use crate::provider_common::{new_http_client, new_streaming_http_client};
 use async_openai::types::chat::CreateChatCompletionRequest;
 use async_openai::types::responses::CreateResponse;
 use futures::StreamExt;
-use reqwest::header::{ACCEPT, ACCEPT_ENCODING, CONTENT_TYPE, HeaderMap};
-use reqwest::{RequestBuilder, Response};
-use serde::Serialize;
-use serde_json::Value;
+use reqwest::Response;
+use reqwest::header::HeaderMap;
 
 pub(super) async fn run_responses_stream_once(
     cfg: &Config,
@@ -19,19 +20,11 @@ pub(super) async fn run_responses_stream_once(
     renderer: &mut StreamRenderer,
     debug_enabled: bool,
 ) -> Result<String, ApiAttemptError> {
-    if debug_enabled {
-        eprintln!(
-            "git-ai-commit: provider debug: POST {} model={} stream=true byot=true",
-            request::responses_url(&cfg.api_base),
-            cfg.model,
-        );
-    }
+    let endpoint = TransportEndpoint::Responses;
+    log_request(cfg, endpoint, true, debug_enabled);
 
-    let client = new_streaming_http_client(cfg).map_err(|message| ApiAttemptError {
-        message,
-        should_fallback: false,
-    })?;
-    let response = execute_responses_request_with_http(&client, cfg, request, true).await?;
+    let client = new_streaming_http_client(cfg).map_err(api_attempt_error)?;
+    let response = execute_request_with_http(&client, cfg, endpoint, request, true).await?;
     collect_responses_stream(response, renderer, debug_enabled).await
 }
 
@@ -40,25 +33,14 @@ pub(super) async fn run_responses_non_stream_once(
     request: &CreateResponse,
     debug_enabled: bool,
 ) -> Result<String, ApiAttemptError> {
-    if debug_enabled {
-        eprintln!(
-            "git-ai-commit: provider debug: POST {} model={} stream=false byot=true",
-            request::responses_url(&cfg.api_base),
-            cfg.model,
-        );
-    }
+    let endpoint = TransportEndpoint::Responses;
+    log_request(cfg, endpoint, false, debug_enabled);
 
-    let client = new_http_client(cfg).map_err(|message| ApiAttemptError {
-        message,
-        should_fallback: false,
-    })?;
-    let response = execute_responses_request_with_http(&client, cfg, request, false).await?;
-    let payload = decode_json_response("responses", response, debug_enabled)
+    let client = new_http_client(cfg).map_err(api_attempt_error)?;
+    let response = execute_request_with_http(&client, cfg, endpoint, request, false).await?;
+    let payload = decode_json_response(endpoint.request_label(), response, debug_enabled)
         .await
-        .map_err(|message| ApiAttemptError {
-            message,
-            should_fallback: false,
-        })?;
+        .map_err(api_attempt_error)?;
 
     response::extract_response_text(payload, debug_enabled).map_err(|message| ApiAttemptError {
         should_fallback: response::should_fallback_from_empty_responses_payload(&message),
@@ -72,16 +54,13 @@ pub(super) async fn run_chat_stream_once(
     renderer: &mut StreamRenderer,
     debug_enabled: bool,
 ) -> Result<String, String> {
-    if debug_enabled {
-        eprintln!(
-            "git-ai-commit: provider debug: POST {} model={} stream=true byot=true",
-            request::chat_completions_url(&cfg.api_base),
-            cfg.model,
-        );
-    }
+    let endpoint = TransportEndpoint::ChatCompletions;
+    log_request(cfg, endpoint, true, debug_enabled);
 
     let client = new_streaming_http_client(cfg)?;
-    let response = execute_chat_request_with_http(&client, cfg, request, true).await?;
+    let response = execute_request_with_http(&client, cfg, endpoint, request, true)
+        .await
+        .map_err(|err| err.message)?;
     collect_chat_stream(response, renderer, debug_enabled).await
 }
 
@@ -90,17 +69,14 @@ pub(super) async fn run_chat_non_stream_once(
     request: &CreateChatCompletionRequest,
     debug_enabled: bool,
 ) -> Result<String, String> {
-    if debug_enabled {
-        eprintln!(
-            "git-ai-commit: provider debug: POST {} model={} stream=false byot=true",
-            request::chat_completions_url(&cfg.api_base),
-            cfg.model,
-        );
-    }
+    let endpoint = TransportEndpoint::ChatCompletions;
+    log_request(cfg, endpoint, false, debug_enabled);
 
     let client = new_http_client(cfg)?;
-    let response = execute_chat_request_with_http(&client, cfg, request, false).await?;
-    let payload = decode_json_response("chat.completions", response, debug_enabled).await?;
+    let response = execute_request_with_http(&client, cfg, endpoint, request, false)
+        .await
+        .map_err(|err| err.message)?;
+    let payload = decode_json_response(endpoint.request_label(), response, debug_enabled).await?;
     response::extract_chat_message(payload, debug_enabled)
 }
 
@@ -116,7 +92,8 @@ pub(super) async fn diagnose_raw_responses_stream(cfg: &Config, request: &Create
         }
     };
 
-    let response = match execute_responses_request_with_http(&client, cfg, request, true).await {
+    let endpoint = TransportEndpoint::Responses;
+    let response = match execute_request_with_http(&client, cfg, endpoint, request, true).await {
         Ok(response) => response,
         Err(err) => {
             eprintln!(
@@ -183,16 +160,9 @@ async fn collect_responses_stream(
 ) -> Result<String, ApiAttemptError> {
     let mut accumulator = response::ResponseTextAccumulator::default();
     let mut error_message = None;
-    let mut last_event_summary = None;
+    let mut completed_message_seen = false;
 
-    sse::collect_sse_events(response, |payload| {
-        if payload == "[DONE]" {
-            return Ok(false);
-        }
-
-        let event: Value = serde_json::from_str(payload)
-            .map_err(|err| format!("stream failed: invalid responses event JSON: {err}"))?;
-        last_event_summary = Some(response::summarize_stream_event(&event));
+    let stream_result = collect_json_sse_events(response, TransportEndpoint::Responses, |event| {
         if let Some(message) = response::append_response_stream_event_text(
             &event,
             renderer,
@@ -202,25 +172,59 @@ async fn collect_responses_stream(
             error_message = Some(message);
         }
 
-        Ok(true)
-    })
-    .await
-    .map_err(|message| ApiAttemptError {
-        should_fallback: false,
-        message: append_last_event_context(message, last_event_summary.as_deref()),
-    })?;
+        if response::stream_event_completes_message(&event)
+            && !accumulator.content().trim().is_empty()
+        {
+            completed_message_seen = true;
+        }
 
-    if !accumulator.content().trim().is_empty() {
-        return Ok(crate::message::sanitize_message(accumulator.content()));
+        Ok(())
+    })
+    .await;
+
+    finalize_responses_stream_result(
+        stream_result,
+        accumulator.content(),
+        completed_message_seen,
+        error_message,
+        debug_enabled,
+    )
+}
+
+fn finalize_responses_stream_result(
+    stream_result: Result<(), String>,
+    content: &str,
+    completed_message_seen: bool,
+    error_message: Option<String>,
+    debug_enabled: bool,
+) -> Result<String, ApiAttemptError> {
+    let sanitized = crate::message::sanitize_message(content);
+
+    match stream_result {
+        Ok(()) => {
+            if !sanitized.trim().is_empty() {
+                return Ok(sanitized);
+            }
+
+            let message = error_message
+                .unwrap_or_else(|| "responses request returned no output text".to_string());
+            Err(ApiAttemptError {
+                should_fallback: response::should_fallback_from_responses_message(&message)
+                    || response::should_fallback_from_empty_responses_payload(&message),
+                message,
+            })
+        }
+        Err(message) if completed_message_seen && !sanitized.trim().is_empty() => {
+            if debug_enabled {
+                eprintln!(
+                    "git-ai-commit: provider debug: responses stream ended after a completed message; returning assembled text despite stream error: {}",
+                    message
+                );
+            }
+            Ok(sanitized)
+        }
+        Err(message) => Err(api_attempt_error(message)),
     }
-
-    let message =
-        error_message.unwrap_or_else(|| "responses request returned no output text".to_string());
-    Err(ApiAttemptError {
-        should_fallback: response::should_fallback_from_responses_message(&message)
-            || response::should_fallback_from_empty_responses_payload(&message),
-        message,
-    })
 }
 
 async fn collect_chat_stream(
@@ -229,18 +233,14 @@ async fn collect_chat_stream(
     debug_enabled: bool,
 ) -> Result<String, String> {
     let mut content = String::new();
-    let mut last_event_summary = None;
 
-    sse::collect_sse_events(response, |payload| {
-        if payload == "[DONE]" {
-            return Ok(false);
-        }
-
-        let event: Value = serde_json::from_str(payload)
-            .map_err(|err| format!("stream failed: invalid chat event JSON: {err}"))?;
-        last_event_summary = Some(response::summarize_stream_event(&event));
+    collect_json_sse_events(response, TransportEndpoint::ChatCompletions, |event| {
         if debug_enabled {
-            response::log_json_payload("chat.completions.stream.event", &event, true);
+            response::log_json_payload(
+                TransportEndpoint::ChatCompletions.stream_debug_label(),
+                &event,
+                true,
+            );
         }
         if let Some(message) = response::extract_error_message(&event) {
             return Err(message);
@@ -252,152 +252,15 @@ async fn collect_chat_stream(
             content.push_str(&delta);
         }
 
-        Ok(true)
+        Ok(())
     })
-    .await
-    .map_err(|message| append_last_event_context(message, last_event_summary.as_deref()))?;
+    .await?;
 
     let sanitized = crate::message::sanitize_message(&content);
     if sanitized.is_empty() {
         return Err("chat completion returned no stream chunks".to_string());
     }
     Ok(sanitized)
-}
-
-async fn decode_json_response(
-    endpoint: &str,
-    response: Response,
-    debug_enabled: bool,
-) -> Result<Value, String> {
-    let body = response.text().await.map_err(|err| err.to_string())?;
-    let payload: Value = serde_json::from_str(&body)
-        .map_err(|err| format!("failed to deserialize api response: {err} content:{body}"))?;
-    if debug_enabled {
-        response::log_json_payload(endpoint, &payload, true);
-    }
-    Ok(payload)
-}
-
-async fn execute_responses_request_with_http(
-    http_client: &reqwest::Client,
-    cfg: &Config,
-    request: &CreateResponse,
-    stream: bool,
-) -> Result<Response, ApiAttemptError> {
-    let builder =
-        build_responses_request(http_client, cfg, request, stream).map_err(|message| {
-            ApiAttemptError {
-                message,
-                should_fallback: false,
-            }
-        })?;
-    let response = builder.send().await.map_err(|err| ApiAttemptError {
-        message: err.to_string(),
-        should_fallback: false,
-    })?;
-
-    if response.status().is_success() {
-        return Ok(response);
-    }
-
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .unwrap_or_else(|_| "<failed to read error body>".to_string());
-    Err(ApiAttemptError {
-        should_fallback: response::should_fallback_from_responses(status.as_u16(), &body),
-        message: format!(
-            "responses request failed with status {}: {}",
-            status.as_u16(),
-            truncate_debug_body(&body)
-        ),
-    })
-}
-
-async fn execute_chat_request_with_http(
-    http_client: &reqwest::Client,
-    cfg: &Config,
-    request: &CreateChatCompletionRequest,
-    stream: bool,
-) -> Result<Response, String> {
-    let builder = build_chat_request(http_client, cfg, request, stream)?;
-    let response = builder.send().await.map_err(|err| err.to_string())?;
-
-    if response.status().is_success() {
-        return Ok(response);
-    }
-
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .unwrap_or_else(|_| "<failed to read error body>".to_string());
-    Err(format!(
-        "chat completion request failed with status {}: {}",
-        status.as_u16(),
-        truncate_debug_body(&body)
-    ))
-}
-
-fn build_responses_request(
-    http_client: &reqwest::Client,
-    cfg: &Config,
-    request: &CreateResponse,
-    stream: bool,
-) -> Result<RequestBuilder, String> {
-    let mut builder = http_client
-        .post(request::responses_url(&cfg.api_base))
-        .header(CONTENT_TYPE, "application/json")
-        .header(ACCEPT_ENCODING, "identity")
-        .header("OpenAI-Beta", "responses=v1")
-        .timeout(cfg.timeout);
-
-    if stream {
-        builder = builder.header(ACCEPT, "text/event-stream");
-    }
-
-    Ok(apply_auth(
-        builder_json(cfg, builder, request, stream, EndpointKind::Responses)?,
-        cfg,
-    ))
-}
-
-fn build_chat_request(
-    http_client: &reqwest::Client,
-    cfg: &Config,
-    request: &CreateChatCompletionRequest,
-    stream: bool,
-) -> Result<RequestBuilder, String> {
-    let mut builder = http_client
-        .post(request::chat_completions_url(&cfg.api_base))
-        .header(CONTENT_TYPE, "application/json")
-        .header(ACCEPT_ENCODING, "identity")
-        .timeout(cfg.timeout);
-
-    if stream {
-        builder = builder.header(ACCEPT, "text/event-stream");
-    }
-
-    Ok(apply_auth(
-        builder_json(cfg, builder, request, stream, EndpointKind::ChatCompletions)?,
-        cfg,
-    ))
-}
-
-fn builder_json<T: Serialize>(
-    cfg: &Config,
-    builder: RequestBuilder,
-    request: &T,
-    stream: bool,
-    endpoint_kind: EndpointKind,
-) -> Result<RequestBuilder, String> {
-    let mut body = serde_json::to_value(request).map_err(|err| err.to_string())?;
-    if stream {
-        body["stream"] = Value::Bool(true);
-    }
-    apply_provider_body_defaults(cfg, endpoint_kind, &mut body);
-    Ok(builder.json(&body))
 }
 
 fn format_headers(headers: &HeaderMap) -> String {
@@ -436,9 +299,35 @@ fn format_hex(bytes: &[u8]) -> String {
     out
 }
 
-fn append_last_event_context(message: String, last_event_summary: Option<&str>) -> String {
-    match last_event_summary {
-        Some(summary) => format!("{message}; last parsed event: {summary}"),
-        None => message,
+#[cfg(test)]
+mod tests {
+    use super::finalize_responses_stream_result;
+
+    #[test]
+    fn returns_message_when_stream_tail_fails_after_completed_message() {
+        let result = finalize_responses_stream_result(
+            Err("stream failed: error decoding response body".to_string()),
+            "feat: keep completed stream output",
+            true,
+            None,
+            false,
+        )
+        .expect("message should be preserved");
+
+        assert_eq!(result, "feat: keep completed stream output");
+    }
+
+    #[test]
+    fn keeps_failing_when_stream_tail_fails_without_completed_message() {
+        let err = finalize_responses_stream_result(
+            Err("stream failed: error decoding response body".to_string()),
+            "feat: partial output",
+            false,
+            None,
+            false,
+        )
+        .expect_err("partial output should not be trusted");
+
+        assert!(err.message.contains("error decoding response body"));
     }
 }

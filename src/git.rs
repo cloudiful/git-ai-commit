@@ -20,7 +20,6 @@ pub struct RepoContext {
     pub diff_patch: String,
     pub diff_truncated: bool,
     pub diff_stat_truncated: bool,
-    pub diff_budget_is_token_mode: bool,
     pub secret_redactions: usize,
     pub secret_redaction_preview: String,
     pub changed_file_count: usize,
@@ -109,7 +108,6 @@ pub fn collect_repo_context(cfg: &Config) -> Result<RepoContext, String> {
         diff_patch: diff_patch.trim().to_string(),
         diff_truncated: sampling.sampled,
         diff_stat_truncated: sampling.stat_truncated,
-        diff_budget_is_token_mode: budget.is_token_mode(),
         secret_redactions: redacted_diff.replacement_occurrences,
         secret_redaction_preview: format_redaction_preview(&redacted_diff.entries),
         changed_file_count: sampling.total_files,
@@ -197,24 +195,16 @@ fn preview_value(value: &str) -> String {
 
 fn log_sampling_notice(budget: DiffBudget, represented_files: usize, total_files: usize) {
     let colors_enabled = stderr_colors_enabled();
-    let message = match budget {
-        DiffBudget::Bytes { max_bytes } => format!(
-            "diff sampled within {} byte budget ({}/{}) files represented",
-            max_bytes, represented_files, total_files
-        ),
-        DiffBudget::Tokens {
-            configured_tokens,
-            effective_tokens,
-        } if configured_tokens != effective_tokens => format!(
+    let message = if budget.configured_tokens != budget.effective_tokens {
+        format!(
             "diff sampled within configured {} tokens, effective {} after context clamp ({}/{}) files represented",
-            configured_tokens, effective_tokens, represented_files, total_files
-        ),
-        DiffBudget::Tokens {
-            configured_tokens, ..
-        } => format!(
+            budget.configured_tokens, budget.effective_tokens, represented_files, total_files
+        )
+    } else {
+        format!(
             "diff sampled within configured {} tokens ({}/{}) files represented",
-            configured_tokens, represented_files, total_files
-        ),
+            budget.configured_tokens, represented_files, total_files
+        )
     };
     eprintln!(
         "{}: {}",
