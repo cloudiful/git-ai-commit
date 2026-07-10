@@ -154,7 +154,7 @@ git ai-commit --debug-provider
 
 If a provider completes `responses` with output tokens but no visible text, `git-ai-commit` treats that as an error by default. Enable `ai.commit.enableFallback` if you want automatic retry and endpoint fallback behavior.
 
-Streaming transport failures now include read-progress context such as chunk count, byte count, SSE event count, the last parsed event, and a short tail preview from the response body.
+Streaming transport failures include the complete available error-source chain, reqwest error classification, HTTP version, remote peer, safe proxy/request headers, elapsed and idle timing, read-progress counters, the last parsed event, and a short tail preview. These diagnostics keep streaming enabled and help distinguish local timeouts from HTTP framing, proxy, and upstream resets.
 
 OpenAI-compatible `responses` requests send `reasoning.effort = "low"` by default. Override it with `ai.commit.reasoningEffort` or `GIT_AI_COMMIT_REASONING_EFFORT` using `low`, `medium`, or `high`.
 

@@ -5,6 +5,7 @@ mod provider_defaults;
 mod request;
 mod response;
 mod sse;
+mod sse_diagnostics;
 mod stream;
 mod stream_palette;
 mod thinking_status;

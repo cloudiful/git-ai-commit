@@ -1,6 +1,8 @@
+use super::sse_diagnostics::{describe_reqwest_error, format_duration, response_context};
 use futures::StreamExt;
 use reqwest::Response;
 use reqwest::header::CONTENT_TYPE;
+use std::time::{Duration, Instant};
 
 const TAIL_PREVIEW_LIMIT: usize = 512;
 
@@ -11,34 +13,49 @@ pub(super) struct SseStats {
     pub(super) event_count: usize,
     pub(super) content_type: Option<String>,
     pub(super) last_payload_preview: Option<String>,
+    pub(super) response_context: Vec<String>,
+    pub(super) elapsed: Duration,
+    pub(super) idle: Duration,
 }
 
 pub(super) async fn collect_sse_events(
     response: Response,
     mut on_payload: impl FnMut(&str) -> Result<bool, String>,
 ) -> Result<SseStats, String> {
+    let started_at = Instant::now();
+    let mut last_chunk_at = started_at;
     let content_type = response
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let response_context = response_context(&response);
     let mut byte_stream = response.bytes_stream();
     let mut buffer = Vec::new();
     let mut stats = SseStats {
         content_type,
+        response_context,
         ..SseStats::default()
     };
 
     while let Some(chunk) = byte_stream.next().await {
-        let chunk = chunk.map_err(|err| {
-            format_stream_error(
-                &format!("stream failed: {err}"),
-                &stats,
-                preview_bytes(&buffer),
-            )
-        })?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                stats.elapsed = started_at.elapsed();
+                stats.idle = last_chunk_at.elapsed();
+                return Err(format_stream_error(
+                    &format!("stream failed: {}", describe_reqwest_error(&err)),
+                    &stats,
+                    preview_bytes(&buffer),
+                ));
+            }
+        };
+        last_chunk_at = Instant::now();
         stats.chunk_count += 1;
         stats.total_bytes += chunk.len();
+        stats.elapsed = started_at.elapsed();
+        stats.idle = Duration::ZERO;
         buffer.extend_from_slice(&chunk);
 
         while let Some(payload) = take_next_sse_payload(&mut buffer)
@@ -78,6 +95,13 @@ fn format_stream_error(message: &str, stats: &SseStats, tail_preview: Option<Str
     if let Some(content_type) = stats.content_type.as_deref() {
         parts.push(format!("content-type: {content_type}"));
     }
+
+    parts.extend(stats.response_context.iter().cloned());
+    parts.push(format!(
+        "elapsed: {}, idle before error: {}",
+        format_duration(stats.elapsed),
+        format_duration(stats.idle)
+    ));
 
     if let Some(payload) = stats.last_payload_preview.as_deref() {
         parts.push(format!("last SSE payload preview: {payload}"));
@@ -186,6 +210,7 @@ fn preview_text(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{SseStats, format_stream_error, take_next_sse_payload_with_eof};
+    use std::time::Duration;
 
     #[test]
     fn includes_progress_and_tail_preview_in_error_message() {
@@ -195,6 +220,12 @@ mod tests {
             event_count: 7,
             content_type: Some("application/json".to_string()),
             last_payload_preview: Some("{\"type\":\"response.reasoning_text.delta\"}".to_string()),
+            response_context: vec![
+                "http-version: HTTP/2.0".to_string(),
+                "x-request-id: req_123".to_string(),
+            ],
+            elapsed: Duration::from_millis(9250),
+            idle: Duration::from_millis(17),
         };
 
         let message = format_stream_error(
@@ -205,6 +236,9 @@ mod tests {
 
         assert!(message.contains("after 3 chunks, 128 bytes, 7 SSE events"));
         assert!(message.contains("content-type: application/json"));
+        assert!(message.contains("http-version: HTTP/2.0"));
+        assert!(message.contains("x-request-id: req_123"));
+        assert!(message.contains("elapsed: 9.250s, idle before error: 17ms"));
         assert!(message.contains("last SSE payload preview"));
         assert!(message.contains("response tail preview"));
     }
