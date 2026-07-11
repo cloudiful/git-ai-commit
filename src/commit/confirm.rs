@@ -1,8 +1,12 @@
+mod input;
+
 use crate::terminal_ui::{
     TerminalUiEnv, current_stderr_ui_env, stderr_colors_enabled_with, style_edit, style_muted,
     style_subject, style_success,
 };
 use std::io::{self, Write};
+
+use self::input::read_confirmation_input;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommitConfirmation {
@@ -18,10 +22,7 @@ pub(super) fn prompt_for_commit_confirmation(
         eprint!("{}", commit_confirmation_prompt(status));
         io::stderr().flush().map_err(|err| err.to_string())?;
 
-        let mut line = String::new();
-        io::stdin()
-            .read_line(&mut line)
-            .map_err(|err| err.to_string())?;
+        let line = read_confirmation_input()?;
 
         match parse_commit_confirmation(line.trim()) {
             Some(result) => return Ok(result),

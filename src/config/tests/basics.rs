@@ -11,7 +11,7 @@ fn defaults_confirm_commit_to_true_and_open_editor_to_false() {
     assert!(cfg.confirm_commit);
     assert!(!cfg.open_editor);
     assert!(!cfg.enable_fallback);
-    assert_eq!(cfg.max_diff_tokens, 16_000);
+    assert_eq!(cfg.max_diff_tokens, 32_000);
     assert_eq!(cfg.model_context_tokens, None);
     assert_eq!(cfg.reasoning_effort.as_api_value(), "low");
     assert!(cfg.redaction_rules.domain);

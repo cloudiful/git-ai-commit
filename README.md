@@ -91,6 +91,7 @@ git config --global ai.commit.model deepseek-chat
 ## Common Options
 
 - `--no-confirm`: commit immediately without the interactive confirm step
+- At the interactive confirmation prompt, press `y`, `e`, or `n` without Enter
 - `--show-redactions`: print the redaction preview before sending the prompt
 - `--debug-provider`: print provider endpoints and full response payloads to stderr
 
@@ -132,7 +133,7 @@ Environment variables can override config, including:
 
 Large staged diffs are sampled instead of being sent in full.
 
-- Default diff token budget: `16000`
+- Default diff token budget: `32000`
 - Auto cap for diff token budget: `64000`
 - Commit message output budget: `4096`
 
