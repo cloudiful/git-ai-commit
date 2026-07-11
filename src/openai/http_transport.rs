@@ -45,7 +45,7 @@ impl TransportEndpoint {
         }
     }
 
-    pub(super) fn url(self, cfg: &Config) -> String {
+    pub(super) fn url(self, cfg: &Config) -> Result<String, String> {
         match self {
             Self::Responses => request::responses_url(&cfg.api_base),
             Self::ChatCompletions => request::chat_completions_url(&cfg.api_base),
@@ -167,7 +167,9 @@ pub(super) fn log_request(
     if debug_enabled {
         eprintln!(
             "git-ai-commit: provider debug: POST {} model={} stream={} byot=true",
-            endpoint.url(cfg),
+            endpoint
+                .url(cfg)
+                .unwrap_or_else(|_| "<invalid api base>".to_string()),
             cfg.model,
             stream,
         );
@@ -189,7 +191,7 @@ fn build_api_request<T: Serialize>(
     stream: bool,
 ) -> Result<RequestBuilder, String> {
     let builder = endpoint
-        .apply_headers(http_client.post(endpoint.url(cfg)), stream)
+        .apply_headers(http_client.post(endpoint.url(cfg)?), stream)
         .timeout(cfg.timeout);
 
     Ok(apply_auth(

@@ -84,7 +84,7 @@ pub(crate) async fn generate_openai_message_with_stream_output(
         .show_thinking_status("drafting commit message")
         .map_err(|err| err.to_string())?;
 
-    let message = match endpoint_preference_for_generation(cfg) {
+    let message = match endpoint_preference_for_generation(cfg)? {
         ApiEndpointPreference::ResponsesOnly => {
             generate_message_via_responses(cfg, &prompt, &mut renderer, debug_provider)
                 .await
@@ -131,12 +131,12 @@ pub(crate) async fn generate_openai_message_with_stream_output(
     Ok(result)
 }
 
-fn endpoint_preference_for_generation(cfg: &Config) -> ApiEndpointPreference {
-    match request::endpoint_preference(&cfg.api_base) {
+fn endpoint_preference_for_generation(cfg: &Config) -> Result<ApiEndpointPreference, String> {
+    Ok(match request::endpoint_preference(&cfg.api_base)? {
         ApiEndpointPreference::Auto if cfg.enable_fallback => ApiEndpointPreference::Auto,
         ApiEndpointPreference::Auto => ApiEndpointPreference::ResponsesOnly,
         explicit => explicit,
-    }
+    })
 }
 
 pub(crate) fn apply_auth(builder: RequestBuilder, cfg: &Config) -> RequestBuilder {
@@ -266,7 +266,7 @@ mod tests {
         );
 
         assert_eq!(
-            endpoint_preference_for_generation(&cfg),
+            endpoint_preference_for_generation(&cfg).unwrap(),
             ApiEndpointPreference::ResponsesOnly
         );
     }
@@ -280,7 +280,7 @@ mod tests {
         );
 
         assert_eq!(
-            endpoint_preference_for_generation(&cfg),
+            endpoint_preference_for_generation(&cfg).unwrap(),
             ApiEndpointPreference::Auto
         );
     }
@@ -294,7 +294,7 @@ mod tests {
         );
 
         assert_eq!(
-            endpoint_preference_for_generation(&cfg),
+            endpoint_preference_for_generation(&cfg).unwrap(),
             ApiEndpointPreference::ChatCompletionsOnly
         );
     }

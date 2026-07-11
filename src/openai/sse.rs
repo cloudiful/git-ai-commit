@@ -126,7 +126,7 @@ fn take_next_sse_payload_inner(
     buffer: &mut Vec<u8>,
     flush_eof: bool,
 ) -> Result<Option<String>, String> {
-    let Some((event_len, separator_len)) = find_sse_event_boundary(buffer).or_else(|| {
+    let Some((event_len, separator_len)) = find_sse_event_boundary(buffer).or({
         if flush_eof && !buffer.is_empty() {
             Some((buffer.len(), 0))
         } else {

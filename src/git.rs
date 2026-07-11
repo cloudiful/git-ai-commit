@@ -141,7 +141,7 @@ fn format_redaction_preview(entries: &[RedactionEntry]) -> String {
                 style_muted(colors_enabled, &format!("x{}", entry.occurrences))
             ));
         }
-        preview.push_str(" ");
+        preview.push(' ');
         preview.push_str(&style_accent(colors_enabled, "<="));
         preview.push(' ');
         preview.push_str(&style_muted(

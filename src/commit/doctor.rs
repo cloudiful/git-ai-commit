@@ -137,7 +137,7 @@ struct OllamaProbe {
 
 async fn probe_ollama_endpoint(cfg: &Config) -> Result<OllamaProbe, String> {
     let client = new_http_client(cfg)?;
-    let response = apply_auth(client.get(models_url(&cfg.api_base)), cfg)
+    let response = apply_auth(client.get(models_url(&cfg.api_base)?), cfg)
         .send()
         .await
         .map_err(|err| format!("probe failed: {err}"))?;
@@ -159,7 +159,7 @@ fn parse_ollama_probe_response(
             );
         }
 
-        if let Ok(parsed) = serde_json::from_str::<ModelsResponse>(&body)
+        if let Ok(parsed) = serde_json::from_str::<ModelsResponse>(body)
             && let Some(error) = parsed.error
             && !error.message.trim().is_empty()
         {
@@ -169,7 +169,7 @@ fn parse_ollama_probe_response(
         return Err(format!("probe failed with status {status}"));
     }
 
-    let parsed: ModelsResponse = serde_json::from_str(&body)
+    let parsed: ModelsResponse = serde_json::from_str(body)
         .map_err(|err| format!("incompatible endpoint (invalid /v1/models response: {err})"))?;
     let model_found = parsed.data.iter().any(|model| model.id == cfg.model);
 
@@ -199,9 +199,12 @@ mod tests {
     fn omits_bearer_auth_for_local_ollama_without_key() {
         let cfg = sample_config(Provider::Ollama, "http://127.0.0.1:11434", "", "llama3.2");
         let client = new_http_client(&cfg).expect("client");
-        let request = apply_auth(client.get(models_url(&cfg.api_base)), &cfg)
-            .build()
-            .expect("request");
+        let request = apply_auth(
+            client.get(models_url(&cfg.api_base).expect("models URL")),
+            &cfg,
+        )
+        .build()
+        .expect("request");
 
         assert!(request.headers().get(AUTHORIZATION).is_none());
     }
@@ -215,9 +218,12 @@ mod tests {
             "gpt-oss:20b",
         );
         let client = new_http_client(&cfg).expect("client");
-        let request = apply_auth(client.get(models_url(&cfg.api_base)), &cfg)
-            .build()
-            .expect("request");
+        let request = apply_auth(
+            client.get(models_url(&cfg.api_base).expect("models URL")),
+            &cfg,
+        )
+        .build()
+        .expect("request");
 
         assert_eq!(
             request
@@ -237,7 +243,7 @@ mod tests {
             &cfg,
         )
         .expect("probe");
-        let lines = vec![
+        let lines = [
             format!(
                 "ollama endpoint: reachable ({} model(s) visible)",
                 probe.visible_model_count
@@ -259,7 +265,7 @@ mod tests {
         let probe =
             super::parse_ollama_probe_response(200, r#"{"data":[{"id":"qwen3:8b"}]}"#, &cfg)
                 .expect("probe");
-        let lines = vec![
+        let lines = [
             format!(
                 "ollama endpoint: reachable ({} model(s) visible)",
                 probe.visible_model_count
@@ -292,7 +298,7 @@ mod tests {
     #[test]
     fn doctor_reports_incompatible_ollama_endpoint() {
         let cfg = sample_config(Provider::Ollama, "http://127.0.0.1:11434", "", "llama3.2");
-        let lines = vec![format!(
+        let lines = [format!(
             "ollama endpoint: {}",
             super::parse_ollama_probe_response(404, "missing", &cfg).expect_err("expected error")
         )];

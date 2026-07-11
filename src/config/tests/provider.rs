@@ -88,6 +88,34 @@ fn rejects_invalid_provider_values() {
 }
 
 #[test]
+fn rejects_invalid_api_base_from_each_config_source() {
+    let mut env = TestConfigEnv::new();
+    env.set_required_openai_env();
+    env.set_env("GIT_AI_COMMIT_API_BASE", Some("not a url"));
+    let error = load_config().expect_err("invalid env URL");
+    assert!(error.contains("invalid ai.commit.apiBase"));
+
+    env.set_env("GIT_AI_COMMIT_API_BASE", None);
+    env.write_git_config("ai.commit.apiBase", "ftp://example.com/v1");
+    env.write_git_config("ai.commit.apiKey", "token");
+    env.write_git_config("ai.commit.model", "model");
+    let error = load_config().expect_err("invalid git URL");
+    assert!(error.contains("expected an absolute http or https URL"));
+
+    drop(env);
+    let mut file_env = TestConfigEnv::new();
+    file_env.write_config_file(
+        r#"{
+  "api_base": "https://",
+  "api_key": "token",
+  "model": "model"
+}"#,
+    );
+    let error = load_config().expect_err("invalid file URL");
+    assert!(error.contains("invalid ai.commit.apiBase"));
+}
+
+#[test]
 fn auto_detects_context_only_for_openrouter_without_explicit_value() {
     let mut env = TestConfigEnv::new();
     env.set_env("GIT_AI_COMMIT_PROVIDER", Some("openai-compatible"));

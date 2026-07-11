@@ -3,6 +3,18 @@ use std::net::IpAddr;
 
 pub const DEFAULT_OLLAMA_API_BASE: &str = "http://localhost:11434";
 
+pub fn validate_api_base(base: &str) -> Result<(), String> {
+    let url = Url::parse(base.trim())
+        .map_err(|err| format!("invalid ai.commit.apiBase value {:?}: {err}", base))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(format!(
+            "invalid ai.commit.apiBase value {:?}: expected an absolute http or https URL with a host",
+            base
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Provider {
     #[default]

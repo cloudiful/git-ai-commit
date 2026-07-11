@@ -80,15 +80,15 @@ fn prompt_prefix(
     prompt
 }
 
-pub(super) fn responses_url(base: &str) -> String {
+pub(super) fn responses_url(base: &str) -> Result<String, String> {
     api_endpoint_url(base, "responses")
 }
 
-pub(super) fn chat_completions_url(base: &str) -> String {
+pub(super) fn chat_completions_url(base: &str) -> Result<String, String> {
     api_endpoint_url(base, "chat/completions")
 }
 
-pub(crate) fn models_url(base: &str) -> String {
+pub(crate) fn models_url(base: &str) -> Result<String, String> {
     api_endpoint_url(base, "models")
 }
 
@@ -99,30 +99,32 @@ pub(crate) enum ApiEndpointPreference {
     ChatCompletionsOnly,
 }
 
-pub(crate) fn endpoint_preference(base: &str) -> ApiEndpointPreference {
-    let url = Url::parse(base.trim()).unwrap_or_else(|_| {
-        panic!("invalid ai.commit.apiBase URL {:?}", base);
-    });
-    match normalized_base_segments(&url).explicit_endpoint {
+pub(crate) fn endpoint_preference(base: &str) -> Result<ApiEndpointPreference, String> {
+    let url = parse_api_base(base)?;
+    Ok(match normalized_base_segments(&url).explicit_endpoint {
         ExplicitEndpoint::Responses => ApiEndpointPreference::ResponsesOnly,
         ExplicitEndpoint::ChatCompletions => ApiEndpointPreference::ChatCompletionsOnly,
         ExplicitEndpoint::Models | ExplicitEndpoint::None => ApiEndpointPreference::Auto,
-    }
+    })
 }
 
-pub(crate) fn api_endpoint_url(base: &str, endpoint: &str) -> String {
-    let mut url = Url::parse(base.trim()).unwrap_or_else(|_| {
-        panic!("invalid ai.commit.apiBase URL {:?}", base);
-    });
+pub(crate) fn api_endpoint_url(base: &str, endpoint: &str) -> Result<String, String> {
+    let mut url = parse_api_base(base)?;
     let normalized = normalized_base_segments(&url);
     let mut segments = normalized.segments;
-    if !normalized.had_known_endpoint && !segments.last().is_some_and(|segment| *segment == "v1") {
+    if !normalized.had_known_endpoint && segments.last().is_none_or(|segment| *segment != "v1") {
         segments.push("v1");
     }
     segments.extend(endpoint.split('/'));
     url.set_path(&format!("/{}", segments.join("/")));
     url.set_query(None);
-    url.to_string()
+    Ok(url.to_string())
+}
+
+fn parse_api_base(base: &str) -> Result<Url, String> {
+    crate::config::validate_api_base(base)?;
+    Url::parse(base.trim())
+        .map_err(|err| format!("invalid ai.commit.apiBase value {:?}: {err}", base))
 }
 
 struct NormalizedBaseSegments<'a> {
@@ -184,23 +186,23 @@ mod tests {
     #[test]
     fn rewrites_known_endpoint_urls() {
         assert_eq!(
-            api_endpoint_url("https://api.openai.com/v1/chat/completions", "responses"),
+            api_endpoint_url("https://api.openai.com/v1/chat/completions", "responses").unwrap(),
             "https://api.openai.com/v1/responses"
         );
         assert_eq!(
-            api_endpoint_url("https://api.openai.com/v1/responses", "chat/completions"),
+            api_endpoint_url("https://api.openai.com/v1/responses", "chat/completions").unwrap(),
             "https://api.openai.com/v1/chat/completions"
         );
         assert_eq!(
-            models_url("http://localhost:11434"),
+            models_url("http://localhost:11434").unwrap(),
             "http://localhost:11434/v1/models"
         );
         assert_eq!(
-            api_endpoint_url("https://example.com/openai/v1/models", "responses"),
+            api_endpoint_url("https://example.com/openai/v1/models", "responses").unwrap(),
             "https://example.com/openai/v1/responses"
         );
         assert_eq!(
-            api_endpoint_url("https://example.com/openai", "chat/completions"),
+            api_endpoint_url("https://example.com/openai", "chat/completions").unwrap(),
             "https://example.com/openai/v1/chat/completions"
         );
     }
@@ -230,20 +232,27 @@ mod tests {
     #[test]
     fn detects_explicit_endpoint_preferences() {
         assert_eq!(
-            endpoint_preference("https://api.openai.com/v1/chat/completions"),
+            endpoint_preference("https://api.openai.com/v1/chat/completions").unwrap(),
             ApiEndpointPreference::ChatCompletionsOnly
         );
         assert_eq!(
-            endpoint_preference("https://api.openai.com/v1/responses"),
+            endpoint_preference("https://api.openai.com/v1/responses").unwrap(),
             ApiEndpointPreference::ResponsesOnly
         );
         assert_eq!(
-            endpoint_preference("https://api.openai.com/v1"),
+            endpoint_preference("https://api.openai.com/v1").unwrap(),
             ApiEndpointPreference::Auto
         );
         assert_eq!(
-            endpoint_preference("https://example.com/openai/v1/models"),
+            endpoint_preference("https://example.com/openai/v1/models").unwrap(),
             ApiEndpointPreference::Auto
         );
+    }
+
+    #[test]
+    fn rejects_invalid_api_base_without_panicking() {
+        let error = api_endpoint_url("not a url", "responses").expect_err("invalid URL");
+
+        assert!(error.contains("invalid ai.commit.apiBase"));
     }
 }

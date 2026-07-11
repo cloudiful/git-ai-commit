@@ -102,7 +102,7 @@ async fn fetch_openrouter_model_context_tokens(
 ) -> Result<Option<usize>, String> {
     let debug_enabled = provider_debug_enabled(debug_provider);
     let client = new_http_client(cfg)?;
-    let url = models_url(&cfg.api_base);
+    let url = models_url(&cfg.api_base)?;
 
     if debug_enabled {
         eprintln!(
