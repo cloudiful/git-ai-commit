@@ -42,24 +42,34 @@ jobs:
         include:
           - os: ubuntu-latest
             target_name: linux-amd64
+            target: x86_64-unknown-linux-gnu
             asset_name: git-ai-commit-linux-amd64
-            binary_path: target/release/git-ai-commit
+            binary_path: target/x86_64-unknown-linux-gnu/release/git-ai-commit
           - os: ubuntu-24.04-arm
             target_name: linux-arm64
+            target: aarch64-unknown-linux-gnu
             asset_name: git-ai-commit-linux-arm64
-            binary_path: target/release/git-ai-commit
+            binary_path: target/aarch64-unknown-linux-gnu/release/git-ai-commit
+          - os: ubuntu-latest
+            target_name: linux-amd64-musl
+            target: x86_64-unknown-linux-musl
+            asset_name: git-ai-commit-linux-amd64-musl
+            binary_path: target/x86_64-unknown-linux-musl/release/git-ai-commit
           - os: macos-26
             target_name: macos-arm64
+            target: aarch64-apple-darwin
             asset_name: git-ai-commit-macos-arm64
-            binary_path: target/release/git-ai-commit
+            binary_path: target/aarch64-apple-darwin/release/git-ai-commit
           - os: windows-latest
             target_name: windows-amd64
+            target: x86_64-pc-windows-msvc
             asset_name: git-ai-commit-windows-amd64.exe
-            binary_path: target/release/git-ai-commit.exe
+            binary_path: target/x86_64-pc-windows-msvc/release/git-ai-commit.exe
           - os: windows-11-arm
             target_name: windows-arm64
+            target: aarch64-pc-windows-msvc
             asset_name: git-ai-commit-windows-arm64.exe
-            binary_path: target/release/git-ai-commit.exe
+            binary_path: target/aarch64-pc-windows-msvc/release/git-ai-commit.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -71,18 +81,44 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Install musl build dependencies
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake musl-tools
+          musl-gcc --version
+
+      - name: Configure musl linker
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
+          echo 'CC_x86_64_unknown_linux_musl=musl-gcc' >> "$GITHUB_ENV"
+
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --target "${{ matrix.target }}"
 
       - name: Prepare Unix release artifacts
         if: runner.os != 'Windows'
         run: |
           install -m 0755 "${{ matrix.binary_path }}" "${{ matrix.asset_name }}"
           shasum -a 256 "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
+
+      - name: Verify musl release artifact
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          test -x "${{ matrix.binary_path }}"
+          file "${{ matrix.binary_path }}" | grep -E 'ELF 64-bit.*x86-64'
+          if readelf -l "${{ matrix.binary_path }}" | grep -q 'INTERP'; then
+            echo "musl binary must not contain a dynamic loader" >&2
+            exit 1
+          fi
+          sha256sum -c "${{ matrix.asset_name }}.sha256"
 
       - name: Prepare Windows release artifacts
         if: runner.os == 'Windows'

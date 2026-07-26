@@ -17,6 +17,7 @@ AI-generated Git commit messages, wired into normal `git commit` flow.
 ## Install
 
 Download a binary from [GitHub Releases](https://github.com/cloudiful/git-ai-commit/releases).
+For musl-based Linux distributions, use `git-ai-commit-linux-amd64-musl`.
 
 Or install from source:
 
