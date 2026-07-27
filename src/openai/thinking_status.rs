@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-const FRAME_INTERVAL: Duration = Duration::from_millis(80);
+const FRAME_INTERVAL: Duration = Duration::from_millis(32);
 const FINAL_HOLD: Duration = Duration::from_millis(160);
 
 pub(crate) struct ThinkingStatus {
