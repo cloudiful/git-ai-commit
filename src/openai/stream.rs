@@ -98,7 +98,7 @@ impl StreamRenderer {
 
         match self.output {
             StreamOutput::Stdout => {
-                self.thinking_status.stop()?;
+                self.thinking_status.complete()?;
                 if self.rendered_message {
                     let _guard = self
                         .output_lock
@@ -123,7 +123,7 @@ impl StreamRenderer {
     }
 
     pub(crate) fn reset(&mut self) {
-        let _ = self.clear_thinking_status();
+        let _ = self.abort_thinking_status();
         self.started = false;
         self.completed = false;
         self.rendered_message = false;
@@ -187,7 +187,15 @@ impl StreamRenderer {
 
     fn clear_thinking_status(&mut self) -> std::io::Result<()> {
         if matches!(self.output, StreamOutput::Stdout) {
-            self.thinking_status.stop()
+            self.thinking_status.complete()
+        } else {
+            Ok(())
+        }
+    }
+
+    fn abort_thinking_status(&mut self) -> std::io::Result<()> {
+        if matches!(self.output, StreamOutput::Stdout) {
+            self.thinking_status.abort()
         } else {
             Ok(())
         }

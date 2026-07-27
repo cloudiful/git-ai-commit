@@ -16,13 +16,14 @@ pub(super) fn render_status(
     output_lock: &Arc<Mutex<()>>,
     palette: StreamPalette,
     frame_index: usize,
+    scroll_position: usize,
     text: &str,
 ) -> std::io::Result<()> {
     let _guard = output_lock
         .lock()
         .map_err(|_| std::io::Error::other("stdout lock poisoned"))?;
     let mut stdout = std::io::stdout().lock();
-    write_status_line(&mut stdout, palette, frame_index, text)?;
+    write_status_line(&mut stdout, palette, frame_index, scroll_position, text)?;
     stdout.flush()
 }
 
@@ -39,10 +40,11 @@ pub(super) fn write_status_line<W: Write>(
     writer: &mut W,
     palette: StreamPalette,
     frame_index: usize,
+    scroll_position: usize,
     text: &str,
 ) -> std::io::Result<()> {
     let frame = SPINNER_FRAMES[frame_index % SPINNER_FRAMES.len()];
-    let window = scrolling_window_text(text, frame_index);
+    let window = scrolling_window_text(text, scroll_position);
     let line = if window.is_empty() {
         LABEL.to_string()
     } else {
@@ -61,8 +63,8 @@ pub(super) fn write_status_line<W: Write>(
     Ok(())
 }
 
-pub(super) fn scrolling_window_text(text: &str, frame_index: usize) -> String {
-    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+pub(super) fn scrolling_window_text(text: &str, scroll_position: usize) -> String {
+    let compact = compact_text(text);
     if compact.is_empty() {
         return String::new();
     }
@@ -72,13 +74,25 @@ pub(super) fn scrolling_window_text(text: &str, frame_index: usize) -> String {
     }
     let mut marquee = chars.clone();
     marquee.extend(std::iter::repeat_n(' ', STATUS_SCROLL_GAP));
-    let start = (frame_index / 2) % marquee.len();
+    let start = scroll_position.min(marquee.len().saturating_sub(STATUS_WINDOW_WIDTH));
     marquee
         .iter()
-        .cycle()
         .skip(start)
         .take(STATUS_WINDOW_WIDTH)
         .collect()
+}
+
+pub(super) fn scrolling_target(text: &str) -> usize {
+    let length = compact_text(text).chars().count();
+    if length <= STATUS_WINDOW_WIDTH {
+        0
+    } else {
+        length + STATUS_SCROLL_GAP - STATUS_WINDOW_WIDTH
+    }
+}
+
+fn compact_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn pad_right(mut text: String, width: usize) -> String {

@@ -1,5 +1,5 @@
 use super::ThinkingState;
-use super::render::{scrolling_window_text, wave_color, write_status_line};
+use super::render::{scrolling_target, scrolling_window_text, wave_color, write_status_line};
 use crate::openai::stream_palette::StreamPalette;
 
 fn strip_ansi(input: &str) -> String {
@@ -32,7 +32,7 @@ fn long_status_text_scrolls_over_time() {
     let text =
         "considering staged changes and summarizing the diff in a compact way for terminal display";
     let status_a = scrolling_window_text(text, 0);
-    let status_b = scrolling_window_text(text, 24);
+    let status_b = scrolling_window_text(text, scrolling_target(text));
     assert_eq!(status_a.chars().count(), 56);
     assert_eq!(status_b.chars().count(), 56);
     assert_ne!(status_a, status_b);
@@ -41,7 +41,7 @@ fn long_status_text_scrolls_over_time() {
 #[test]
 fn write_status_line_renders_unicode_spinner_and_truecolor_gradient() {
     let mut out = Vec::new();
-    write_status_line(&mut out, StreamPalette::TrueColor, 0, "considering diff").unwrap();
+    write_status_line(&mut out, StreamPalette::TrueColor, 0, 0, "considering diff").unwrap();
     let rendered = String::from_utf8(out).unwrap();
     let plain = strip_ansi(&rendered);
     assert!(rendered.contains("⠋"));
