@@ -235,7 +235,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn responses_body_omits_default_reasoning_effort() {
+    fn responses_body_sets_default_reasoning_effort_to_none() {
         let cfg = sample_config();
         let request = CreateResponseArgs::default()
             .model("gpt-4.1-mini")
@@ -251,7 +251,7 @@ mod tests {
         )
         .expect("body");
 
-        assert!(body.get("reasoning").is_none());
+        assert_eq!(body["reasoning"], json!({ "effort": "none" }));
     }
 
     #[test]

@@ -158,6 +158,6 @@ If a provider completes `responses` with output tokens but no visible text, `git
 
 Streaming transport failures include the complete available error-source chain, reqwest error classification, HTTP version, remote peer, safe proxy/request headers, elapsed and idle timing, read-progress counters, the last parsed event, and a short tail preview. These diagnostics keep streaming enabled and help distinguish local timeouts from HTTP framing, proxy, and upstream resets.
 
-OpenAI-compatible `responses` requests disable reasoning by default. Override it with `ai.commit.reasoningEffort` or `GIT_AI_COMMIT_REASONING_EFFORT` using `none`, `low`, `medium`, or `high`.
+OpenAI-compatible `responses` requests send `reasoning.effort = "none"` by default. Override it with `ai.commit.reasoningEffort` or `GIT_AI_COMMIT_REASONING_EFFORT` using `none`, `low`, `medium`, or `high`.
 
 When a `responses` stream emits `reasoning_summary_text` deltas, `git-ai-commit` now shows a dim Unicode spinner with a soft animated gradient thinking status line in the terminal while keeping them out of the final commit message. The fixed-width window smoothly follows each reasoning chunk and waits for the final chunk to reach its target before showing the commit message. On true-color terminals, the streamed subject and body also use a softer same-family palette instead of the plain default body white.

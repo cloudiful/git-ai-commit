@@ -33,10 +33,6 @@ impl ReasoningEffort {
             Self::High => "high",
         }
     }
-
-    pub fn is_disabled(self) -> bool {
-        matches!(self, Self::None)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
