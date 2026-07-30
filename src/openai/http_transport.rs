@@ -235,7 +235,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn responses_body_adds_default_reasoning_effort() {
+    fn responses_body_omits_default_reasoning_effort() {
         let cfg = sample_config();
         let request = CreateResponseArgs::default()
             .model("gpt-4.1-mini")
@@ -251,7 +251,7 @@ mod tests {
         )
         .expect("body");
 
-        assert_eq!(body["reasoning"], json!({ "effort": "low" }));
+        assert!(body.get("reasoning").is_none());
     }
 
     #[test]
@@ -288,7 +288,7 @@ mod tests {
             max_diff_tokens: 16_000,
             max_diff_tokens_explicit: false,
             model_context_tokens: None,
-            reasoning_effort: crate::config::ReasoningEffort::Low,
+            reasoning_effort: crate::config::ReasoningEffort::None,
         }
     }
 }

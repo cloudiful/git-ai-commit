@@ -327,7 +327,7 @@ mod tests {
             max_diff_tokens: 16_000,
             max_diff_tokens_explicit: false,
             model_context_tokens: None,
-            reasoning_effort: crate::config::ReasoningEffort::Low,
+            reasoning_effort: crate::config::ReasoningEffort::None,
         }
     }
 }

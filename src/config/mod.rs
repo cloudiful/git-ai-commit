@@ -128,7 +128,7 @@ pub fn load_partial_config() -> Result<Config, String> {
             "ai.commit.reasoningEffort",
             |values| values.reasoning_effort.as_ref(),
             |cfg| cfg.reasoning_effort.as_deref(),
-            ReasoningEffort::Low,
+            ReasoningEffort::None,
         )?,
     })
 }

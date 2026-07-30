@@ -12,7 +12,10 @@ pub(super) fn apply_provider_body_defaults(
     endpoint_kind: EndpointKind,
     body: &mut Value,
 ) {
-    if endpoint_kind == EndpointKind::Responses && body.get("reasoning").is_none() {
+    if endpoint_kind == EndpointKind::Responses
+        && !cfg.reasoning_effort.is_disabled()
+        && body.get("reasoning").is_none()
+    {
         body["reasoning"] = json!({ "effort": cfg.reasoning_effort.as_api_value() });
     }
 }
@@ -25,7 +28,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn adds_default_reasoning_effort_for_responses_requests() {
+    fn omits_reasoning_effort_when_disabled() {
         let cfg = sample_config("gpt-4.1-mini");
         let mut body = json!({
             "model": "gpt-4.1-mini",
@@ -34,7 +37,7 @@ mod tests {
 
         apply_provider_body_defaults(&cfg, EndpointKind::Responses, &mut body);
 
-        assert_eq!(body["reasoning"], json!({ "effort": "low" }));
+        assert!(body.get("reasoning").is_none());
     }
 
     #[test]
@@ -94,7 +97,7 @@ mod tests {
             max_diff_tokens: 16_000,
             max_diff_tokens_explicit: false,
             model_context_tokens: None,
-            reasoning_effort: crate::config::ReasoningEffort::Low,
+            reasoning_effort: crate::config::ReasoningEffort::None,
         }
     }
 }

@@ -8,6 +8,7 @@ use std::time::Duration;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ReasoningEffort {
     #[default]
+    None,
     Low,
     Medium,
     High,
@@ -16,6 +17,7 @@ pub enum ReasoningEffort {
 impl ReasoningEffort {
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
+            "none" | "off" | "disabled" => Some(Self::None),
             "low" => Some(Self::Low),
             "medium" => Some(Self::Medium),
             "high" => Some(Self::High),
@@ -25,10 +27,15 @@ impl ReasoningEffort {
 
     pub fn as_api_value(self) -> &'static str {
         match self {
+            Self::None => "none",
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
         }
+    }
+
+    pub fn is_disabled(self) -> bool {
+        matches!(self, Self::None)
     }
 }
 
