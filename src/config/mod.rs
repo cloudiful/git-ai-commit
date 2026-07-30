@@ -16,7 +16,7 @@ pub use self::provider::{
 pub use self::types::{Config, DiffBudgetConfig, ReasoningEffort};
 use self::types::{FileConfig, FileRedactionRules, RawConfigValues};
 
-pub const DEFAULT_TIMEOUT_SEC: u64 = 60;
+pub const DEFAULT_TIMEOUT_SEC: u64 = 180;
 pub const DEFAULT_MAX_DIFF_TOKENS: usize = 32_000;
 pub const MAX_AUTO_DIFF_TOKENS: usize = 64_000;
 
