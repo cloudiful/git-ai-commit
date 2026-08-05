@@ -1,9 +1,9 @@
 use crate::commit::{run_commit, run_doctor};
 use crate::generate::run_generate;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "git-ai-commit", disable_help_subcommand = true)]
+#[command(name = "git-ai-commit", version, disable_help_subcommand = true)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -25,7 +25,18 @@ struct CommitArgs {
 
 pub async fn run(args: Vec<String>) -> Result<(), String> {
     if args.is_empty() || args[0].starts_with('-') {
-        return run_commit(&args).await;
+        match args.first().map(String::as_str) {
+            Some("-V" | "--version") => {
+                print!("{}", Cli::command().render_version());
+                return Ok(());
+            }
+            Some("-h" | "--help") => {
+                Cli::command().print_help().map_err(|err| err.to_string())?;
+                println!();
+                return Ok(());
+            }
+            _ => return run_commit(&args).await,
+        }
     }
 
     let cli = Cli::try_parse_from(
@@ -67,5 +78,29 @@ mod tests {
             .block_on(run(vec!["--edit".to_string()]))
             .expect_err("expected commit parse error");
         assert!(err.contains("unknown git-ai-commit flag"));
+    }
+
+    #[test]
+    fn prints_version() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(run(vec!["--version".to_string()]))
+            .expect("version should print");
+        rt.block_on(run(vec!["-V".to_string()]))
+            .expect("version should print");
+    }
+
+    #[test]
+    fn prints_help() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(run(vec!["--help".to_string()]))
+            .expect("help should print");
+        rt.block_on(run(vec!["-h".to_string()]))
+            .expect("help should print");
     }
 }
