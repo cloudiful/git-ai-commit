@@ -59,6 +59,7 @@ pub struct Config {
     pub max_diff_tokens_explicit: bool,
     pub model_context_tokens: Option<usize>,
     pub reasoning_effort: ReasoningEffort,
+    pub suppress_diff_dirs: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -78,6 +79,7 @@ pub(super) struct FileConfig {
     pub(super) max_diff_tokens: Option<usize>,
     pub(super) model_context_tokens: Option<usize>,
     pub(super) reasoning_effort: Option<String>,
+    pub(super) suppress_diff_dirs: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -118,6 +120,7 @@ pub(super) struct RawConfigValues {
     pub(super) max_diff_tokens: Option<String>,
     pub(super) model_context_tokens: Option<String>,
     pub(super) reasoning_effort: Option<String>,
+    pub(super) suppress_diff_dirs: Option<String>,
 }
 
 impl Config {

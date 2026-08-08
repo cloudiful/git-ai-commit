@@ -3,3 +3,4 @@ pub const DIFF_STAT_TRUNCATED_NOTICE: &str = "[diff stat truncated]\n";
 pub const DIFF_HEADER_TRUNCATED_NOTICE: &str = "[file header truncated]\n";
 pub const DIFF_HUNK_TRUNCATED_NOTICE: &str = "[hunk truncated]\n";
 pub const DIFF_DELETED_FILE_NOTICE: &str = "[content omitted for delete-only file]\n";
+pub const DIFF_SUPPRESSED_CONTENT_NOTICE: &str = "[content omitted: generated metadata file]\n";

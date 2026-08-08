@@ -43,11 +43,18 @@ fn load_env_values() -> RawConfigValues {
         max_diff_tokens: env_value("GIT_AI_COMMIT_MAX_DIFF_TOKENS"),
         model_context_tokens: env_value("GIT_AI_COMMIT_MODEL_CONTEXT_TOKENS"),
         reasoning_effort: env_value("GIT_AI_COMMIT_REASONING_EFFORT"),
+        suppress_diff_dirs: env_value_allow_empty("GIT_AI_COMMIT_SUPPRESS_DIFF_DIRS"),
     }
 }
 
 fn env_value(key: &str) -> Option<String> {
     std::env::var(key).ok().and_then(non_empty_trimmed)
+}
+
+fn env_value_allow_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
 }
 
 pub(super) fn non_empty_trimmed(value: String) -> Option<String> {

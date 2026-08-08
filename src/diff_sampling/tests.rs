@@ -1,6 +1,7 @@
 use super::{
-    DIFF_DELETED_FILE_NOTICE, DIFF_SAMPLING_NOTICE, DiffBudget, prepare_diff_for_prompt,
-    resolve_diff_budget, sample_diff_patch,
+    DIFF_DELETED_FILE_NOTICE, DIFF_SAMPLING_NOTICE, DIFF_SUPPRESSED_CONTENT_NOTICE, DiffBudget,
+    prepare_diff_for_prompt, rebuild_patch_from_files, resolve_diff_budget, sample_diff_patch,
+    suppress_generated_content,
 };
 use crate::config::DiffBudgetConfig;
 use crate::diff_parse::{DiffFileKind, parse_diff_files};
@@ -143,6 +144,52 @@ fn classifies_semantic_kinds() {
 }
 
 #[test]
+fn parses_target_paths_from_diff_headers() {
+    let diff = [
+        "diff --git a/src/app.rs b/src/app.rs",
+        "index 111..222 100644",
+        "--- a/src/app.rs",
+        "+++ b/src/app.rs",
+        "@@ -1 +1 @@",
+        "-a",
+        "+b",
+        "diff --git a/old.json b/.sqlx/query-aaa.json",
+        "similarity index 50%",
+        "rename from old.json",
+        "rename to .sqlx/query-aaa.json",
+        "diff --git \"a/weird file.txt\" \"b/weird file.txt\"",
+        "index 111..222 100644",
+        "--- \"a/weird file.txt\"",
+        "+++ \"b/weird file.txt\"",
+        "@@ -1 +1 @@",
+        "-x",
+        "+y",
+        "diff --git \"a/.sqlx/query-\\303\\251.json\" \"b/.sqlx/query-\\303\\251.json\"",
+        "index 111..222 100644",
+        "--- \"a/.sqlx/query-\\303\\251.json\"",
+        "+++ \"b/.sqlx/query-\\303\\251.json\"",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+        "",
+    ]
+    .join("\n");
+
+    let files = parse_diff_files(&diff);
+    let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+
+    assert_eq!(
+        paths,
+        vec![
+            "src/app.rs",
+            ".sqlx/query-aaa.json",
+            "weird file.txt",
+            ".sqlx/query-é.json"
+        ]
+    );
+}
+
+#[test]
 fn represents_multiple_files() {
     let diff = build_multi_file_diff(&["alpha.txt", "beta.txt", "gamma.txt"], 20);
     let files = parse_diff_files(&diff);
@@ -222,6 +269,51 @@ fn keeps_full_diff_when_under_budget() {
     assert_eq!(sampled_patch.trim(), diff_patch.trim());
     assert_eq!(result.represented_files, 1);
     assert_eq!(result.total_files, 1);
+}
+
+#[test]
+fn full_diff_path_excludes_suppressed_hunks_but_keeps_headers() {
+    let diff_patch = [
+        "diff --git a/.sqlx/query-aaa.json b/.sqlx/query-aaa.json",
+        "index 111..222 100644",
+        "--- a/.sqlx/query-aaa.json",
+        "+++ b/.sqlx/query-aaa.json",
+        "@@ -1 +1 @@",
+        "-{\"query\": \"SELECT 1\"}",
+        "+{\"query\": \"SELECT 2\"}",
+        "diff --git a/src/app.rs b/src/app.rs",
+        "index 333..444 100644",
+        "--- a/src/app.rs",
+        "+++ b/src/app.rs",
+        "@@ -1 +1 @@",
+        "-old-app",
+        "+new-app",
+        "",
+    ]
+    .join("\n");
+    let diff_stat = " .sqlx/query-aaa.json | 2 +-\n src/app.rs | 2 +-\n 2 files changed\n";
+    let suppressed =
+        suppress_generated_content(&parse_diff_files(&diff_patch), &[".sqlx".to_string()]);
+    let filtered_patch = rebuild_patch_from_files(&suppressed.files);
+
+    let (_trimmed_stat, sampled_patch, result) = prepare_diff_for_prompt(
+        &suppressed.files,
+        diff_stat,
+        &filtered_patch,
+        DiffBudget {
+            configured_tokens: 6000,
+            effective_tokens: 6000,
+        },
+    )
+    .expect("diff prep");
+
+    assert!(!result.sampled);
+    assert_eq!(result.total_files, 2);
+    assert!(sampled_patch.contains("diff --git a/.sqlx/query-aaa.json"));
+    assert!(sampled_patch.contains(DIFF_SUPPRESSED_CONTENT_NOTICE.trim()));
+    assert!(!sampled_patch.contains("SELECT 1"));
+    assert!(!sampled_patch.contains("SELECT 2"));
+    assert!(sampled_patch.contains("+new-app"));
 }
 
 #[test]

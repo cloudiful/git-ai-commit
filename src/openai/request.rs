@@ -26,6 +26,12 @@ pub(crate) fn build_prompt(repo_ctx: &RepoContext) -> String {
             repo_ctx.secret_redactions
         ));
     }
+    if repo_ctx.suppressed_file_count > 0 {
+        prompt.push_str(&format!(
+            "\nGenerated metadata file content omitted before prompt: {}",
+            repo_ctx.suppressed_file_count
+        ));
+    }
 
     prompt.push_str("\n\nDiff stat:\n");
     if repo_ctx.diff_stat.is_empty() {

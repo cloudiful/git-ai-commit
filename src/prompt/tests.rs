@@ -118,5 +118,6 @@ fn sample_config(provider: Provider, api_base: &str, api_key: &str, model: &str)
         max_diff_tokens_explicit: false,
         model_context_tokens: None,
         reasoning_effort: crate::config::ReasoningEffort::None,
+        suppress_diff_dirs: vec!["sqlx".to_string()],
     }
 }

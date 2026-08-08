@@ -16,6 +16,96 @@ fn defaults_confirm_commit_to_true_and_open_editor_to_false() {
     assert_eq!(cfg.reasoning_effort.as_api_value(), "none");
     assert!(cfg.redaction_rules.domain);
     assert!(!cfg.redaction_rules.person);
+    assert_eq!(cfg.suppress_diff_dirs, vec![".sqlx".to_string()]);
+}
+
+#[test]
+fn reads_suppress_diff_dirs_from_git_config() {
+    let env = TestConfigEnv::new();
+    env.write_git_config("ai.commit.apiBase", "https://example.com/v1");
+    env.write_git_config("ai.commit.apiKey", "token");
+    env.write_git_config("ai.commit.model", "gpt-4.1-mini");
+    env.write_git_config(
+        "ai.commit.suppressDiffDirs",
+        ".sqlx, dist/,target/generated",
+    );
+
+    let cfg = load_config().expect("expected config");
+
+    assert_eq!(
+        cfg.suppress_diff_dirs,
+        vec![".sqlx", "dist", "target/generated"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn reads_suppress_diff_dirs_from_config_file() {
+    let mut env = TestConfigEnv::new();
+    env.write_config_file(
+        r#"{
+  "api_base": "https://example.com/v1",
+  "api_key": "token",
+  "model": "gpt-4.1-mini",
+  "suppress_diff_dirs": " .sqlx , build/out "
+}"#,
+    );
+
+    let cfg = load_config().expect("expected config");
+
+    assert_eq!(
+        cfg.suppress_diff_dirs,
+        vec![".sqlx", "build/out"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn env_overrides_git_for_suppress_diff_dirs() {
+    let mut env = TestConfigEnv::new();
+    env.write_git_config("ai.commit.apiBase", "https://example.com/v1");
+    env.write_git_config("ai.commit.apiKey", "token");
+    env.write_git_config("ai.commit.model", "gpt-4.1-mini");
+    env.write_git_config("ai.commit.suppressDiffDirs", ".sqlx");
+    env.set_env("GIT_AI_COMMIT_SUPPRESS_DIFF_DIRS", Some("generated,out"));
+
+    let cfg = load_config().expect("expected config");
+
+    assert_eq!(
+        cfg.suppress_diff_dirs,
+        vec!["generated", "out"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn empty_env_value_disables_suppress_diff_dirs() {
+    let mut env = TestConfigEnv::new();
+    env.set_required_openai_env();
+    env.set_env("GIT_AI_COMMIT_SUPPRESS_DIFF_DIRS", Some(""));
+
+    let cfg = load_config().expect("expected config");
+
+    assert!(cfg.suppress_diff_dirs.is_empty());
+}
+
+#[test]
+fn empty_git_config_value_disables_suppress_diff_dirs() {
+    let env = TestConfigEnv::new();
+    env.write_git_config("ai.commit.apiBase", "https://example.com/v1");
+    env.write_git_config("ai.commit.apiKey", "token");
+    env.write_git_config("ai.commit.model", "gpt-4.1-mini");
+    env.write_git_config("ai.commit.suppressDiffDirs", "");
+
+    let cfg = load_config().expect("expected config");
+
+    assert!(cfg.suppress_diff_dirs.is_empty());
 }
 
 #[test]

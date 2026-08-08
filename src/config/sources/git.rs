@@ -73,6 +73,10 @@ fn raw_values_from_map(values: &HashMap<String, String>) -> RawConfigValues {
         max_diff_tokens: get("ai.commit.maxdifftokens"),
         model_context_tokens: get("ai.commit.modelcontexttokens"),
         reasoning_effort: get("ai.commit.reasoningeffort"),
+        suppress_diff_dirs: values
+            .get("ai.commit.suppressdiffdirs")
+            .cloned()
+            .map(|value| value.trim().to_string()),
     }
 }
 

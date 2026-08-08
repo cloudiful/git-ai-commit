@@ -12,6 +12,7 @@ AI-generated Git commit messages, wired into normal `git commit` flow.
 - Keeps fallback and retry behavior opt-in
 - Supports Ollama and Anthropic-compatible endpoints
 - Redacts sensitive-looking values from diffs before sending prompts
+- Omits generated metadata diff content (`.sqlx` by default) while keeping file names
 - Preserves normal Git behavior for flows like `-m`, `--amend`, and path arguments
 
 ## Install
@@ -111,6 +112,7 @@ Most users only need these keys:
 - `ai.commit.maxDiffTokens`
 - `ai.commit.modelContextTokens`
 - `ai.commit.reasoningEffort`
+- `ai.commit.suppressDiffDirs`
 
 Environment variables can override config, including:
 
@@ -120,6 +122,7 @@ Environment variables can override config, including:
 - `GIT_AI_COMMIT_MODEL`
 - `GIT_AI_COMMIT_ENABLE_FALLBACK`
 - `GIT_AI_COMMIT_REASONING_EFFORT`
+- `GIT_AI_COMMIT_SUPPRESS_DIFF_DIRS`
 
 ## Behavior Notes
 
@@ -139,6 +142,12 @@ Large staged diffs are sampled instead of being sent in full.
 - Commit message output budget: `4096`
 
 If `ai.commit.modelContextTokens` is unset and the provider is OpenRouter, the tool can auto-detect model context from `/v1/models` and adjust the diff budget automatically.
+
+## Generated Metadata
+
+SQLx offline-mode query metadata under `.sqlx/` is regenerated machine output: its diff content adds noise without meaningful signal. By default `git-ai-commit` omits the content of files under `.sqlx/` from the prompt while keeping their names in the diff stat and headers, so SQL changes stay the focus of the commit message.
+
+Set `ai.commit.suppressDiffDirs` (comma-separated directory list, e.g. `.sqlx,dist/`) to change the directories. Any configured directory replaces the default of `.sqlx`. Directories are matched as repo-root-relative prefixes, so a nested metadata dir needs its full path (e.g. `src/.sqlx`). Set the value to an empty string (`GIT_AI_COMMIT_SUPPRESS_DIFF_DIRS=` or `git config ai.commit.suppressDiffDirs ""`) to disable suppression entirely.
 
 ## Troubleshooting
 

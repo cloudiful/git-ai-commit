@@ -5,6 +5,13 @@ use super::{
 };
 use redactor::RedactionRules;
 
+fn parse_comma_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|part| part.trim().trim_end_matches('/').to_string())
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
 impl ConfigSnapshot {
     pub(super) fn provider_value(&self) -> Result<Provider, String> {
         let raw = self
@@ -30,6 +37,21 @@ impl ConfigSnapshot {
             .or_else(|| raw_getter(&self.git).cloned())
             .or_else(|| self.file.as_ref().and_then(|cfg| file_getter(cfg).cloned()))
             .unwrap_or_default()
+    }
+
+    pub(super) fn list_value(
+        &self,
+        raw_getter: impl Fn(&RawConfigValues) -> Option<&String>,
+        file_getter: impl Fn(&FileConfig) -> Option<&String>,
+        fallback: Vec<String>,
+    ) -> Vec<String> {
+        let raw = raw_getter(&self.env)
+            .or_else(|| raw_getter(&self.git))
+            .or_else(|| self.file.as_ref().and_then(file_getter));
+        match raw {
+            Some(raw) => parse_comma_list(raw),
+            None => fallback,
+        }
     }
 
     pub(super) fn has_configured_value(

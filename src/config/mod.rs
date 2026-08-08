@@ -19,6 +19,7 @@ use self::types::{FileConfig, FileRedactionRules, RawConfigValues};
 pub const DEFAULT_TIMEOUT_SEC: u64 = 180;
 pub const DEFAULT_MAX_DIFF_TOKENS: usize = 32_000;
 pub const MAX_AUTO_DIFF_TOKENS: usize = 64_000;
+pub const DEFAULT_SUPPRESS_DIFF_DIR: &str = ".sqlx";
 
 pub fn default_redaction_rules() -> redactor::RedactionRules {
     use redactor::FindingKind;
@@ -130,6 +131,11 @@ pub fn load_partial_config() -> Result<Config, String> {
             |cfg| cfg.reasoning_effort.as_deref(),
             ReasoningEffort::None,
         )?,
+        suppress_diff_dirs: snapshot.list_value(
+            |values| values.suppress_diff_dirs.as_ref(),
+            |cfg| cfg.suppress_diff_dirs.as_ref(),
+            vec![DEFAULT_SUPPRESS_DIFF_DIR.to_string()],
+        ),
     })
 }
 

@@ -1,6 +1,9 @@
 use crate::config::Config;
 use crate::diff_parse::parse_diff_files;
-use crate::diff_sampling::{DiffBudget, prepare_diff_for_prompt, resolve_diff_budget};
+use crate::diff_sampling::{
+    DiffBudget, prepare_diff_for_prompt, rebuild_patch_from_files, resolve_diff_budget,
+    suppress_generated_content,
+};
 use crate::redaction::{RedactionEntry, RedactionResult, redact_diff_for_prompt};
 use crate::terminal_ui::{
     current_stderr_ui_env, stderr_colors_enabled, stderr_colors_enabled_with, style_accent,
@@ -22,6 +25,7 @@ pub struct RepoContext {
     pub diff_stat_truncated: bool,
     pub secret_redactions: usize,
     pub secret_redaction_preview: String,
+    pub suppressed_file_count: usize,
     pub changed_file_count: usize,
     pub represented_file_count: usize,
 }
@@ -51,26 +55,32 @@ pub fn collect_repo_context(cfg: &Config) -> Result<RepoContext, String> {
         ["diff", "--cached", "--no-ext-diff", "--unified=3"],
     )?;
     let files = parse_diff_files(&diff_patch);
+    let suppressed = suppress_generated_content(&files, &cfg.suppress_diff_dirs);
+    let filtered_patch = rebuild_patch_from_files(&suppressed.files);
     let repo_name = repo_path
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_else(|| repo_root.clone());
     let budget = resolve_diff_budget(cfg.diff_budget(), &repo_name, &branch_name, files.len())?;
     let redacted_diff = if cfg.redact_secrets {
-        redact_diff_for_prompt(&diff_patch, cfg.redaction_rules)
+        redact_diff_for_prompt(&filtered_patch, cfg.redaction_rules)
     } else {
         RedactionResult {
-            text: diff_patch,
+            text: filtered_patch,
             replacement_occurrences: 0,
             unique_values: 0,
             entries: Vec::new(),
         }
     };
+    let redacted_files = parse_diff_files(&redacted_diff.text);
     let (diff_stat, diff_patch, sampling) =
-        prepare_diff_for_prompt(&files, &diff_stat, &redacted_diff.text, budget)?;
+        prepare_diff_for_prompt(&redacted_files, &diff_stat, &redacted_diff.text, budget)?;
 
     if sampling.sampled {
         log_sampling_notice(budget, sampling.represented_files, sampling.total_files);
+    }
+    if suppressed.suppressed_count > 0 {
+        log_suppression_notice(suppressed.suppressed_count);
     }
     if redacted_diff.replacement_occurrences > 0 {
         let colors_enabled = stderr_colors_enabled();
@@ -110,6 +120,7 @@ pub fn collect_repo_context(cfg: &Config) -> Result<RepoContext, String> {
         diff_stat_truncated: sampling.stat_truncated,
         secret_redactions: redacted_diff.replacement_occurrences,
         secret_redaction_preview: format_redaction_preview(&redacted_diff.entries),
+        suppressed_file_count: suppressed.suppressed_count,
         changed_file_count: sampling.total_files,
         represented_file_count: sampling.represented_files,
     })
@@ -210,6 +221,18 @@ fn log_sampling_notice(budget: DiffBudget, represented_files: usize, total_files
         "{}: {}",
         style_label(colors_enabled, "git-ai-commit"),
         style_muted(colors_enabled, &message),
+    );
+}
+
+fn log_suppression_notice(count: usize) {
+    let colors_enabled = stderr_colors_enabled();
+    eprintln!(
+        "{}: {}",
+        style_label(colors_enabled, "git-ai-commit"),
+        style_muted(
+            colors_enabled,
+            &format!("omitted generated metadata content for {count} file(s)"),
+        ),
     );
 }
 
