@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Shortcut directories, properties, and conditional components for git-ai-commit.
+
+  Source shape follows the WiX Toolset v6 Start Menu how-to and the
+  WixUI_InstallDir customization pattern documented at
+  https://wixtoolset.org/docs/schema/wxs/shortcut/ (Shortcut parents
+  File/CreateFolder/Component; Target/WorkingDirectory/Directory),
+  https://wixtoolset.org/docs/schema/wxs/component/ (Condition/Directory/Guid),
+  https://wixtoolset.org/docs/schema/wxs/property/ (Secure public properties),
+  https://wixtoolset.org/docs/schema/wxs/registryvalue/ (HKCU KeyPath for
+  non-advertised per-user shortcuts), and
+  https://wixtoolset.org/docs/schema/wxs/removefolder/ (uninstall cleanup),
+  plus https://wixtoolset.org/docs/tools/wixext/wixui/ (copy-and-rename the
+  WixUI_InstallDir sequence to insert a custom dialog).
+
+  Both shortcuts are non-advertised shell links (Advertise defaults to "no";
+  set explicitly) that launch the installed git-ai-commit.exe with no
+  Arguments. git-ai-commit has no `gui` subcommand (only
+  generate/doctor/commit), so no Arguments attribute is set.
+
+  Upgrade behavior: component GUIDs are stable, the UpgradeCode lives in
+  wix/git-ai-commit.wxs, and MajorUpgrade reinstalls these components from
+  scratch, so the checkboxes/defaults apply the same way on upgrade.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <!--
+      Public properties backing the two independent checkboxes in
+      ShortcutOptionsDlg. Uppercase names keep them settable from the UI
+      and from msiexec command lines; Secure="yes" lets the values reach
+      the execute sequence. Start Menu defaults to checked (Value="1"),
+      Desktop defaults to unchecked (no Value).
+    -->
+    <Property Id="GIT_AI_COMMIT_STARTMENU_SHORTCUT" Value="1" Secure="yes" />
+    <Property Id="GIT_AI_COMMIT_DESKTOP_SHORTCUT" Secure="yes" />
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="git-ai-commit" />
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="ShortcutComponents">
+      <!--
+        Start Menu shortcut. Condition "=1" keeps the component independent
+        of the Desktop selection; unchecked (null/empty) or explicit 0 skips
+        it. Target uses the [!FileId] form so the link resolves to the exe
+        installed by GitAiCommitExeComponent without tripping ICE69 for a
+        cross-component file reference in the same feature.
+      -->
+      <Component
+        Id="GitAiCommitStartMenuShortcutComponent"
+        Guid="17E04D7D-A304-4596-81C9-BD0AED2DE0DE"
+        Directory="ApplicationProgramsFolder"
+        Condition="GIT_AI_COMMIT_STARTMENU_SHORTCUT=1">
+        <Shortcut
+          Id="GitAiCommitStartMenuShortcut"
+          Name="git-ai-commit"
+          Target="[!GitAiCommitExeFile]"
+          WorkingDirectory="INSTALLFOLDER"
+          Description="git-ai-commit CLI"
+          Advertise="no" />
+        <RemoveFolder Directory="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\git-ai-commit"
+          Name="StartMenuShortcut"
+          Value="1"
+          Type="string"
+          KeyPath="yes" />
+      </Component>
+
+      <!--
+        Desktop shortcut. Independent property/condition pair; defaults to
+        absent so a default install creates no Desktop link. No RemoveFolder
+        is needed: removing the component removes the .lnk itself.
+      -->
+      <Component
+        Id="GitAiCommitDesktopShortcutComponent"
+        Guid="EEA9105B-F382-4203-BAA1-2E23D2F0007B"
+        Directory="DesktopFolder"
+        Condition="GIT_AI_COMMIT_DESKTOP_SHORTCUT=1">
+        <Shortcut
+          Id="GitAiCommitDesktopShortcut"
+          Name="git-ai-commit"
+          Target="[!GitAiCommitExeFile]"
+          WorkingDirectory="INSTALLFOLDER"
+          Description="git-ai-commit CLI"
+          Advertise="no" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\git-ai-commit"
+          Name="DesktopShortcut"
+          Value="1"
+          Type="string"
+          KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
