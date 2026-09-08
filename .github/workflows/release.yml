@@ -44,13 +44,13 @@ jobs:
           - os: windows-latest
             target_name: windows-amd64
             target: x86_64-pc-windows-msvc
-            asset_name: git-ai-commit-windows-amd64.exe
+            zip_name: git-ai-commit-windows-amd64.zip
             msi_name: git-ai-commit-windows-amd64.msi
             binary_path: target/x86_64-pc-windows-msvc/release/git-ai-commit.exe
           - os: windows-11-arm
             target_name: windows-arm64
             target: aarch64-pc-windows-msvc
-            asset_name: git-ai-commit-windows-arm64.exe
+            zip_name: git-ai-commit-windows-arm64.zip
             msi_name: git-ai-commit-windows-arm64.msi
             binary_path: target/aarch64-pc-windows-msvc/release/git-ai-commit.exe
     runs-on: ${{ matrix.os }}
@@ -129,9 +129,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Copy-Item "${{ matrix.binary_path }}" "${{ matrix.asset_name }}"
-          $hash = (Get-FileHash -Algorithm SHA256 "${{ matrix.asset_name }}").Hash.ToLowerInvariant()
-          "$hash  ${{ matrix.asset_name }}" | Out-File -FilePath "${{ matrix.asset_name }}.sha256" -Encoding ascii
+          Copy-Item "${{ matrix.binary_path }}" "git-ai-commit.exe"
+          Compress-Archive -Path "git-ai-commit.exe" -DestinationPath "${{ matrix.zip_name }}" -Force
+          $hash = (Get-FileHash -Algorithm SHA256 "${{ matrix.zip_name }}").Hash.ToLowerInvariant()
+          "$hash  ${{ matrix.zip_name }}" | Out-File -FilePath "${{ matrix.zip_name }}.sha256" -Encoding ascii
+          Remove-Item "git-ai-commit.exe" -Force
 
       - name: Install WiX Toolset (Windows)
         if: runner.os == 'Windows'
@@ -163,15 +165,15 @@ jobs:
             Write-Error "Tag '$tag' must be strict numeric MAJOR.MINOR.PATCH (for example v1.2.3)."
             exit 1
           }
-          $exeName = '${{ matrix.asset_name }}'
-          $msiName = $exeName -replace '\.exe$', '.msi'
+          $zipName = '${{ matrix.zip_name }}'
+          $msiName = '${{ matrix.msi_name }}'
           if ('${{ matrix.target }}' -eq 'aarch64-pc-windows-msvc') {
             $wixArch = 'arm64'
           } else {
             $wixArch = 'x64'
           }
           New-Item -ItemType Directory -Force -Path msi-stage | Out-Null
-          Copy-Item -Path $exeName -Destination 'msi-stage\git-ai-commit.exe' -Force
+          Copy-Item -Path "${{ matrix.binary_path }}" -Destination 'msi-stage\git-ai-commit.exe' -Force
           $wixLog = 'wix-build-${{ matrix.target }}.log'
           if (Test-Path $wixLog) { Remove-Item $wixLog -Force }
           wix build wix/git-ai-commit.wxs wix/Shortcuts.wxs wix/ShortcutOptionsDlg.wxs -arch $wixArch -d SourceDir=msi-stage -d Version=$msiVersion -ext WixToolset.UI.wixext -o $msiName *>&1 | Tee-Object -FilePath $wixLog
@@ -193,7 +195,7 @@ jobs:
           # Never publish the WiX pdb sidecar or build logs on success.
           Remove-Item *.wixpdb -Force -ErrorAction SilentlyContinue
           if (Test-Path $wixLog) { Remove-Item $wixLog -Force }
-          Get-ChildItem $exeName, $msiName
+          Get-ChildItem $zipName, $msiName
 
       - name: Upload WiX build log (Windows)
         if: failure() && runner.os == 'Windows'
@@ -205,7 +207,7 @@ jobs:
 
       # Explicit artifact paths only: no wildcards that could pick up
       # `.wixpdb` or logs. Non-Windows uploads only the raw binary; the
-      # Windows step uploads the exe plus the MSI produced by the matrix step.
+      # Windows step uploads the zip plus the MSI produced by the matrix step.
       - name: Upload release artifacts
         if: runner.os != 'Windows'
         uses: actions/upload-artifact@v7
@@ -222,8 +224,8 @@ jobs:
         with:
           name: git-ai-commit-${{ matrix.target_name }}-${{ github.run_id }}
           path: |
-            ${{ matrix.asset_name }}
-            ${{ matrix.asset_name }}.sha256
+            ${{ matrix.zip_name }}
+            ${{ matrix.zip_name }}.sha256
             ${{ matrix.msi_name }}
             ${{ matrix.msi_name }}.sha256
           if-no-files-found: error
