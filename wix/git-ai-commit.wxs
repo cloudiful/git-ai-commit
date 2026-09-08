@@ -2,15 +2,17 @@
 <!--
   WiX v6 per-user installer for git-ai-commit.
 
-  Build (run on the Windows x64 runner only):
+  Build (run on the Windows runner; x64 or arm64):
     wix build wix/git-ai-commit.wxs wix/Shortcuts.wxs wix/ShortcutOptionsDlg.wxs -arch x64 -d SourceDir=msi-stage -d Version=1.2.3 -ext WixToolset.UI.wixext -o git-ai-commit-windows-amd64.msi
+    wix build wix/git-ai-commit.wxs wix/Shortcuts.wxs wix/ShortcutOptionsDlg.wxs -arch arm64 -d SourceDir=msi-stage -d Version=1.2.3 -ext WixToolset.UI.wixext -o git-ai-commit-windows-arm64.msi
 
   Preprocessor variables:
     SourceDir - directory containing git-ai-commit.exe to install.
     Version   - strict numeric MAJOR.MINOR.PATCH derived from the release tag.
 
-  MSI is x64-only (x86_64-pc-windows-msvc); windows-arm64 ships as raw
-  .exe only. Install scope is per-user under
+  MSI is built for both Windows targets (x64 x86_64-pc-windows-msvc and
+  arm64 aarch64-pc-windows-msvc); the -arch flag and output name come from
+  the release matrix. Install scope is per-user under
   LocalAppDataFolder/git-ai-commit with a per-user PATH entry.
 
   Shortcut options live in wix/Shortcuts.wxs (independent Start Menu /
