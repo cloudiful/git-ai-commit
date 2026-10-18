@@ -1,2 +1,4 @@
 /target
 Cargo.lock
+/.cache/
+__pycache__/

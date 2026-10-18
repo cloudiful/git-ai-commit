@@ -1,0 +1,37 @@
+class GitAiCommit < Formula
+  desc "AI-generated Git commit messages from staged changes"
+  homepage "https://github.com/cloudiful/git-ai-commit"
+  version "${VERSION}"
+  license "Apache-2.0"
+
+  on_macos do
+    on_arm do
+      url "${MACOS_ARM64_URL}"
+      sha256 "${MACOS_ARM64_SHA256}"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "${LINUX_ARM64_URL}"
+      sha256 "${LINUX_ARM64_SHA256}"
+    end
+    on_intel do
+      url "${LINUX_AMD64_URL}"
+      sha256 "${LINUX_AMD64_SHA256}"
+    end
+  end
+
+  livecheck do
+    url :stable
+    strategy :github_latest
+  end
+
+  def install
+    bin.install Dir["git-ai-commit-*"].first => "git-ai-commit"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/git-ai-commit --version")
+  end
+end

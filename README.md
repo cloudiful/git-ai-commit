@@ -20,7 +20,20 @@ AI-generated Git commit messages, wired into normal `git commit` flow.
 Download a binary from [GitHub Releases](https://github.com/cloudiful/git-ai-commit/releases).
 For musl-based Linux distributions, use `git-ai-commit-linux-amd64-musl`.
 
-Or install from source:
+### Homebrew
+
+Apple Silicon macOS and Linux ARM64/x86_64:
+
+```sh
+brew tap cloudiful/tap
+brew install cloudiful/tap/git-ai-commit
+```
+
+Upgrade with `brew upgrade cloudiful/tap/git-ai-commit`. Intel Macs are not
+supported because no Intel macOS build is published. See
+[docs/homebrew.md](docs/homebrew.md) for tap maintenance.
+
+### From source
 
 ```sh
 cargo install --git https://github.com/cloudiful/git-ai-commit.git git-ai-commit

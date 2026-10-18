@@ -1,0 +1,144 @@
+name: Bump Homebrew tap
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable release tag to publish, for example v0.1.17
+        required: true
+        type: string
+      dry_run:
+        description: Render the formula without writing to the tap
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-tap-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
+      RELEASE_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      RELEASE_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      INPUT_TAG: ${{ inputs.tag }}
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout trusted scripts
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: source
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$RELEASE_RUN_HEAD_BRANCH"
+          fi
+
+          if ! [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid stable release tag: '$tag'" >&2
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            ref_type=$(gh api "repos/$REPO/git/ref/tags/$tag" --jq '.object.type')
+            ref_sha=$(gh api "repos/$REPO/git/ref/tags/$tag" --jq '.object.sha')
+            if [ "$ref_type" = "tag" ]; then
+              commit_sha=$(gh api "repos/$REPO/git/tags/$ref_sha" --jq '.object.sha')
+            else
+              commit_sha="$ref_sha"
+            fi
+            if [ "$commit_sha" != "$RELEASE_RUN_HEAD_SHA" ]; then
+              echo "Tag $tag resolves to $commit_sha but the Release run was for $RELEASE_RUN_HEAD_SHA" >&2
+              exit 1
+            fi
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Render formula without writing
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        working-directory: source
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          uv run --no-project python .github/scripts/homebrew/generate_formula.py \
+            --tag "$TAG" --dry-run
+
+      - name: Require tap token
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "HOMEBREW_TAP_TOKEN is required to update cloudiful/homebrew-tap" >&2
+            exit 1
+          fi
+
+      - name: Checkout tap
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        uses: actions/checkout@v7
+        with:
+          repository: cloudiful/homebrew-tap
+          ref: main
+          path: tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          persist-credentials: true
+
+      - name: Fetch current tap main
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        run: |
+          git -C tap fetch origin main
+          git -C tap reset --hard origin/main
+
+      - name: Update formula
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        working-directory: source
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          TAP_DIR: ${{ github.workspace }}/tap
+        run: |
+          uv run --no-project python .github/scripts/homebrew/generate_formula.py \
+            --tag "$TAG" --tap "$TAP_DIR"
+
+      - name: Commit and push formula
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        working-directory: tap
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git add -- Formula/git-ai-commit.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date for $TAG"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: bump git-ai-commit to $TAG"
+          git push origin HEAD:main

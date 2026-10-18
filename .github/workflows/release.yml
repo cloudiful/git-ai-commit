@@ -104,7 +104,6 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           install -m 0755 "${{ matrix.binary_path }}" "${{ matrix.asset_name }}"
-          shasum -a 256 "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
 
       - name: Verify musl release artifact
         if: matrix.target == 'x86_64-unknown-linux-musl'
@@ -115,7 +114,13 @@ jobs:
             echo "musl binary must not contain a dynamic loader" >&2
             exit 1
           fi
-          sha256sum -c "${{ matrix.asset_name }}.sha256"
+          test -x "${{ matrix.asset_name }}"
+          file "${{ matrix.asset_name }}" | grep -E 'ELF 64-bit.*x86-64'
+          if readelf -l "${{ matrix.asset_name }}" | grep -q 'INTERP'; then
+            echo "musl release asset must not contain a dynamic loader" >&2
+            exit 1
+          fi
+          cmp "${{ matrix.binary_path }}" "${{ matrix.asset_name }}"
 
       - name: Prepare Windows release artifacts
         if: runner.os == 'Windows'
@@ -123,8 +128,6 @@ jobs:
         run: |
           Copy-Item "${{ matrix.binary_path }}" "git-ai-commit.exe"
           Compress-Archive -Path "git-ai-commit.exe" -DestinationPath "${{ matrix.zip_name }}" -Force
-          $hash = (Get-FileHash -Algorithm SHA256 "${{ matrix.zip_name }}").Hash.ToLowerInvariant()
-          "$hash  ${{ matrix.zip_name }}" | Out-File -FilePath "${{ matrix.zip_name }}.sha256" -Encoding ascii
           Remove-Item "git-ai-commit.exe" -Force
 
       - name: Install WiX Toolset (Windows)
@@ -182,8 +185,6 @@ jobs:
             Write-Output "::error::wix build failed (exit $wixExit): $wixDetail"
             exit $wixExit
           }
-          $msiHash = (Get-FileHash -Algorithm SHA256 $msiName).Hash.ToLowerInvariant()
-          "$msiHash  $msiName" | Out-File -FilePath "$msiName.sha256" -Encoding ascii
           # Never publish the WiX pdb sidecar or build logs on success.
           Remove-Item *.wixpdb -Force -ErrorAction SilentlyContinue
           if (Test-Path $wixLog) { Remove-Item $wixLog -Force }
@@ -207,7 +208,6 @@ jobs:
           name: git-ai-commit-${{ matrix.target_name }}-${{ github.run_id }}
           path: |
             ${{ matrix.asset_name }}
-            ${{ matrix.asset_name }}.sha256
           if-no-files-found: error
 
       - name: Upload release artifacts (Windows with MSI)
@@ -217,9 +217,7 @@ jobs:
           name: git-ai-commit-${{ matrix.target_name }}-${{ github.run_id }}
           path: |
             ${{ matrix.zip_name }}
-            ${{ matrix.zip_name }}.sha256
             ${{ matrix.msi_name }}
-            ${{ matrix.msi_name }}.sha256
           if-no-files-found: error
 
   release-tag:
