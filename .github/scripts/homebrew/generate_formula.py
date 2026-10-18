@@ -25,6 +25,19 @@ TEMPLATE_PATH = Path(__file__).with_name("formula.rb.tmpl")
 STABLE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 SHA256_DIGEST = re.compile(r"^sha256:([0-9a-f]{64})$")
 FORMULA_VERSION = re.compile(r'^\s*version "([^"]*)"\s*$', re.MULTILINE)
+STABLE_VERSION = (
+    r"(?P<major>0|[1-9][0-9]*)"
+    r"\.(?P<minor>0|[1-9][0-9]*)"
+    r"\.(?P<patch>0|[1-9][0-9]*)"
+)
+STABLE_URL = re.compile(
+    r'^\s*url "https://github\.com/'
+    + re.escape(REPO)
+    + r"/releases/download/v"
+    + STABLE_VERSION
+    + r'/(?P<asset>[^"/]+)"\s*$',
+    re.MULTILINE,
+)
 
 ASSETS = {
     "git-ai-commit-macos-arm64": "MACOS_ARM64",
@@ -91,7 +104,7 @@ def validate_release(
             raise FormulaError(f"duplicate release asset: {name}")
         by_name[name] = asset
 
-    values = {"VERSION": str(release_tag)[1:]}
+    values: dict[str, str] = {}
     for name, prefix in ASSETS.items():
         asset = by_name.get(name)
         if asset is None:
@@ -133,13 +146,53 @@ def render_formula(
 
 
 def existing_version(text: str) -> tuple[int, int, int]:
-    match = FORMULA_VERSION.search(text)
-    if not match:
-        raise FormulaError("existing formula has no explicit version")
-    try:
-        return parse_version("v" + match.group(1))
-    except FormulaError as error:
-        raise FormulaError(f"existing formula version is invalid: {error}") from error
+    versions: set[tuple[int, int, int]] = set()
+    assets: set[str] = set()
+    for match in STABLE_URL.finditer(text):
+        url_version = "v{}.{}.{}".format(
+            match.group("major"), match.group("minor"), match.group("patch")
+        )
+        versions.add(parse_version(url_version))
+        assets.add(match.group("asset"))
+
+    if not versions:
+        raise FormulaError("existing formula has no canonical release download URL")
+    if len(versions) > 1:
+        listed = ", ".join(sorted(format_version(item) for item in versions))
+        raise FormulaError(
+            f"existing formula mixes release versions in download URLs: {listed}"
+        )
+
+    missing = sorted(set(ASSETS) - assets)
+    unexpected = sorted(assets - set(ASSETS))
+    if missing or unexpected:
+        details = []
+        if missing:
+            details.append("missing " + ", ".join(missing))
+        if unexpected:
+            details.append("unexpected " + ", ".join(unexpected))
+        raise FormulaError(
+            "existing formula canonical release URLs do not match the expected "
+            "assets (" + "; ".join(details) + ")"
+        )
+
+    url_version = versions.pop()
+    declared = FORMULA_VERSION.search(text)
+    if declared is not None:
+        try:
+            declared_version = parse_version("v" + declared.group(1))
+        except FormulaError as error:
+            raise FormulaError(
+                f"existing formula version is invalid: {error}"
+            ) from error
+        if declared_version != url_version:
+            raise FormulaError(
+                "existing formula declares version "
+                f"{format_version(declared_version)} but its download URLs use "
+                f"{format_version(url_version)}"
+            )
+
+    return url_version
 
 
 def check_existing_formula(text: str, version: tuple[int, int, int]) -> None:

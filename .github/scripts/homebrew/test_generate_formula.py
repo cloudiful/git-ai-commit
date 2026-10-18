@@ -23,7 +23,7 @@ class RenderTest(unittest.TestCase):
     def test_renders_release_assets_and_install_name(self):
         version, text = generator.render_formula(self.release, "v0.1.17")
         self.assertEqual(version, (0, 1, 17))
-        self.assertIn('version "0.1.17"', text)
+        self.assertNotRegex(text, r'(?m)^\s*version "')
         self.assertIn('license "Apache-2.0"', text)
         self.assertIn(
             "https://github.com/cloudiful/git-ai-commit/releases/download/"
@@ -143,11 +143,26 @@ class TapWriteTest(unittest.TestCase):
     def formula_text(self) -> str:
         return (self.tap / generator.FORMULA_PATH).read_text(encoding="utf-8")
 
+    def render_for(self, tag: str) -> str:
+        release = copy.deepcopy(self.release)
+        release["tag_name"] = tag
+        for asset in release["assets"]:
+            asset["browser_download_url"] = generator.expected_download_url(
+                tag, asset["name"]
+            )
+        _, text = generator.render_formula(release)
+        return text
+
+    def write_existing(self, text: str) -> str:
+        (self.tap / generator.FORMULA_PATH).write_text(text, encoding="utf-8")
+        return text
+
     def test_writes_once_and_identical_rerun_is_noop(self):
         code, stdout, _ = self.run_cli("--tap", str(self.tap))
         self.assertEqual(code, 0)
         self.assertIn("wrote", stdout)
         first = self.formula_text()
+        self.assertNotIn('version "', first)
 
         code, stdout, _ = self.run_cli("--tap", str(self.tap))
         self.assertEqual(code, 0)
@@ -157,14 +172,101 @@ class TapWriteTest(unittest.TestCase):
     def test_dry_run_prints_formula_without_writing(self):
         code, stdout, _ = self.run_cli("--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn('version "0.1.17"', stdout)
+        self.assertIn(
+            "https://github.com/cloudiful/git-ai-commit/releases/download/"
+            "v0.1.17/git-ai-commit-macos-arm64",
+            stdout,
+        )
+        self.assertNotIn('version "', stdout)
         self.assertFalse((self.tap / generator.FORMULA_PATH).exists())
 
-    def test_rejects_downgrade(self):
-        existing = (
-            'class GitAiCommit < Formula\n  version "0.2.0"\nend\n'
+    def test_derives_version_from_urls_only(self):
+        existing = self.write_existing(self.render_for("v0.1.16"))
+        self.assertEqual(generator.existing_version(existing), (0, 1, 16))
+
+        code, stdout, _ = self.run_cli("--tap", str(self.tap))
+        self.assertEqual(code, 0)
+        self.assertIn("wrote", stdout)
+        self.assertEqual(self.formula_text(), self.render_for("v0.1.17"))
+
+    def test_parses_matching_declared_version_but_refuses_drift(self):
+        base = self.render_for("v0.1.17")
+        existing = base.replace(
+            '  license "Apache-2.0"\n',
+            '  version "0.1.17"\n  license "Apache-2.0"\n',
         )
-        (self.tap / generator.FORMULA_PATH).write_text(existing, encoding="utf-8")
+        self.assertNotEqual(existing, base)
+        self.write_existing(existing)
+
+        self.assertEqual(generator.existing_version(existing), (0, 1, 17))
+
+        code, _, stderr = self.run_cli("--tap", str(self.tap))
+        self.assertEqual(code, 1)
+        self.assertIn("different content", stderr)
+        self.assertEqual(self.formula_text(), existing)
+
+    def test_rejects_declared_version_mismatch(self):
+        base = self.render_for("v0.1.17")
+        existing = self.write_existing(
+            base.replace(
+                '  license "Apache-2.0"\n',
+                '  version "0.1.16"\n  license "Apache-2.0"\n',
+            )
+        )
+        with self.assertRaises(generator.FormulaError):
+            generator.existing_version(existing)
+
+        code, _, stderr = self.run_cli("--tap", str(self.tap))
+        self.assertEqual(code, 1)
+        self.assertIn("declares version", stderr)
+        self.assertEqual(self.formula_text(), existing)
+
+    def test_rejects_inconsistent_url_versions(self):
+        base = self.render_for("v0.1.17")
+        existing = self.write_existing(
+            base.replace(
+                "releases/download/v0.1.17/git-ai-commit-linux-arm64",
+                "releases/download/v0.1.16/git-ai-commit-linux-arm64",
+            )
+        )
+        with self.assertRaises(generator.FormulaError):
+            generator.existing_version(existing)
+
+        code, _, stderr = self.run_cli("--tap", str(self.tap))
+        self.assertEqual(code, 1)
+        self.assertIn("mixes release versions", stderr)
+        self.assertEqual(self.formula_text(), existing)
+
+    def test_rejects_malformed_url_version(self):
+        base = self.render_for("v0.1.17")
+        existing = self.write_existing(
+            base.replace(
+                "releases/download/v0.1.17/git-ai-commit-macos-arm64",
+                "releases/download/v01.1.17/git-ai-commit-macos-arm64",
+            )
+        )
+        with self.assertRaises(generator.FormulaError):
+            generator.existing_version(existing)
+
+        code, _, stderr = self.run_cli("--tap", str(self.tap))
+        self.assertEqual(code, 1)
+        self.assertIn("do not match the expected assets", stderr)
+        self.assertEqual(self.formula_text(), existing)
+
+    def test_rejects_formula_without_canonical_urls(self):
+        existing = self.write_existing(
+            'class GitAiCommit < Formula\n  version "0.1.17"\nend\n'
+        )
+        with self.assertRaises(generator.FormulaError):
+            generator.existing_version(existing)
+
+        code, _, stderr = self.run_cli("--tap", str(self.tap))
+        self.assertEqual(code, 1)
+        self.assertIn("no canonical release download URL", stderr)
+        self.assertEqual(self.formula_text(), existing)
+
+    def test_rejects_downgrade(self):
+        existing = self.write_existing(self.render_for("v0.2.0"))
 
         code, _, stderr = self.run_cli("--tap", str(self.tap))
         self.assertEqual(code, 1)
@@ -172,10 +274,12 @@ class TapWriteTest(unittest.TestCase):
         self.assertEqual(self.formula_text(), existing)
 
     def test_rejects_same_version_with_different_content(self):
-        existing = (
-            'class GitAiCommit < Formula\n  version "0.1.17"\nend\n'
+        existing = self.write_existing(
+            self.render_for("v0.1.17").replace(
+                "AI-generated Git commit messages from staged changes",
+                "Different description",
+            )
         )
-        (self.tap / generator.FORMULA_PATH).write_text(existing, encoding="utf-8")
 
         code, _, stderr = self.run_cli("--tap", str(self.tap))
         self.assertEqual(code, 1)
