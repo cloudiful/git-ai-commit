@@ -101,8 +101,9 @@ an originating release run to match.
 ## Validation limits
 
 - Tap CI runs `brew audit`, `brew install --build-from-source`, `brew test`,
-  and `brew livecheck` for both tap formulae on `macos-14` and
-  `ubuntu-latest`.
+  and advisory `brew livecheck` for the formula on `macos-latest` and
+  `ubuntu-24.04`. The pinned Linux binary requires glibc newer than Ubuntu
+  22.04 provides.
 - The local generator tests are offline and use fixture release metadata:
   `uv run --no-project python -m unittest discover -s .github/scripts/homebrew -p 'test_*.py' -v`.
 - Homebrew is not available in every development environment, so formula
